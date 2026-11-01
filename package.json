@@ -1,0 +1,85 @@
+{
+  "name": "satztresor",
+  "version": "1.3.0",
+  "description": "SatzTresor v1.3.0 — Moderner, lokaler Satzbaustein-Manager mit AES-256-Verschlüsselung & automatischer Textersetzung",
+  "author": "SatzTresor Project",
+  "license": "MIT",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "build:exe": "node build/build-release.js nsis portable",
+    "build:installer": "node build/build-release.js nsis",
+    "build:portable": "node build/build-release.js portable",
+    "build:store": "node build/build-release.js appx"
+  },
+  "dependencies": {
+    "koffi": "^2.9.3"
+  },
+  "devDependencies": {
+    "electron": "^35.0.0",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "de.satztresor.app",
+    "productName": "SatzTresor",
+    "copyright": "Copyright © 2026 SatzTresor Project",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**/*",
+      "ui/**/*",
+      "satztresor.ico",
+      "satztresor.png",
+      "logo.png",
+      "package.json"
+    ],
+    "asar": true,
+    "extraResources": [
+      "satztresor.ico"
+    ],
+    "asarUnpack": [
+      "**/*.node",
+      "node_modules/koffi/**"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        },
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "artifactName": "${productName}-Setup-${version}.${ext}",
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "SatzTresor",
+      "deleteAppDataOnUninstall": false
+    },
+    "portable": {
+      "artifactName": "${productName}-Portable-${version}.${ext}"
+    },
+    "appx": {
+      "artifactName": "${productName}-Store-${version}.${ext}",
+      "applicationId": "SatzTresor",
+      "identityName": "SatzTresor.App",
+      "publisher": "CN=00000000-0000-0000-0000-000000000000",
+      "publisherDisplayName": "SatzTresor",
+      "displayName": "SatzTresor - Satzbaustein-Manager",
+      "backgroundColor": "#18181b",
+      "showNameOnTiles": true,
+      "addAutoLaunchExtension": true
+    }
+  }
+}

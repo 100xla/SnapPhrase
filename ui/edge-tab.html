@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="de" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';">
+  <title>SatzTresor Edge</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      -webkit-user-drag: none;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: transparent;
+      display: flex;
+      align-items: center;
+    }
+
+    body.side-left {
+      justify-content: flex-start;
+    }
+
+    body.side-right {
+      justify-content: flex-end;
+    }
+
+    .edge-handle {
+      width: 7px;
+      height: 64px;
+      background: rgba(30, 41, 59, 0.72);
+      border: 1px solid rgba(59, 130, 246, 0.45);
+      color: #60a5fa;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      opacity: 0.55;
+      transition: width 0.14s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.14s ease, background 0.14s ease, box-shadow 0.14s ease;
+    }
+
+    html.light .edge-handle {
+      background: rgba(255, 255, 255, 0.88);
+      border-color: rgba(37, 99, 235, 0.45);
+      color: #2563eb;
+    }
+
+    body.side-left .edge-handle {
+      border-left: none;
+      border-radius: 0 9px 9px 0;
+    }
+
+    body.side-right .edge-handle {
+      border-right: none;
+      border-radius: 9px 0 0 9px;
+    }
+
+    .edge-icon {
+      opacity: 0;
+      transform: scale(0.75);
+      transition: opacity 0.12s ease, transform 0.12s ease;
+      pointer-events: none;
+    }
+
+    body:hover .edge-handle,
+    body.dragging .edge-handle {
+      width: 18px;
+      opacity: 1;
+      background: #2563eb;
+      border-color: #60a5fa;
+      color: #ffffff;
+      box-shadow: 0 0 12px rgba(37, 99, 235, 0.55);
+    }
+
+    body:hover .edge-icon,
+    body.dragging .edge-icon {
+      opacity: 1;
+      transform: scale(1);
+    }
+  </style>
+</head>
+<body class="side-left" title="SatzTresor öffnen (Ziehen zum Verschieben • Rechtsklick für Menü)">
+  <div id="edgeHandle" class="edge-handle">
+    <svg class="edge-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+      <path d="M13 7l-3 5h4l-3 5"/>
+    </svg>
+  </div>
+  <script src="edge-tab.js"></script>
+</body>
+</html>

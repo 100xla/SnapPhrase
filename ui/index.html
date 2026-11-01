@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="de" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SatzTresor</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- Top Search Bar -->
+  <div class="search-container">
+    <div class="search-icon">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="11" cy="11" r="8"></circle>
+        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+      </svg>
+    </div>
+    <input type="text" id="searchInput" class="search-input" placeholder="Satzbaustein suchen..." autofocus autocomplete="off" spellcheck="false">
+    <div class="search-badges">
+      <span id="matchCountBadge" class="badge-kbd">0</span>
+      <button id="btnLockNow" class="btn-pin" style="display: none;" title="Datenbank jetzt sperren (Strg+L)">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+          <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+        </svg>
+      </button>
+      <button id="btnPinWindow" class="btn-pin" title="SatzTresor fixieren (Desktop passt sich an / Fenster bleibt offen)">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="12" y1="17" x2="12" y2="22"></line>
+          <path d="M5 17h14v-2l-2-3V6a2 2 0 0 0-2-2h-6a2 2 0 0 0-2 2v6l-2 3v2z"></path>
+        </svg>
+      </button>
+      <button id="btnToggleWidth" class="btn-pin" title="Tab-Breite anpassen (Kompakt: 320px / Standard: 440px)">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="4 14 10 14 10 20"></polyline>
+          <polyline points="20 10 14 10 14 4"></polyline>
+          <line x1="14" y1="10" x2="21" y2="3"></line>
+          <line x1="3" y1="21" x2="10" y2="14"></line>
+        </svg>
+      </button>
+      <button id="btnNewSnippetQuick" class="btn-new-snippet" title="Neuen Satzbaustein anlegen (Strg+N)">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+        <span>+ Neu</span>
+      </button>
+      <button id="btnOpenSettings" class="btn-pin" title="Einstellungen öffnen">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"></circle>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+        </svg>
+      </button>
+      <button id="btnCollapseWindow" class="btn-pin" title="SatzTresor einklappen (Esc)">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="5" y1="12" x2="19" y2="12"></line>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- Categories Filter Bar -->
+  <div id="categoriesBar" class="categories-bar">
+    <button class="category-pill active" data-cat="[ Alle ]">🌐 Alle</button>
+    <button class="category-pill" data-cat="[ ⭐ Favoriten ]">⭐ Favoriten</button>
+    <button class="category-pill" data-cat="[ 🕒 Zuletzt ]">🕒 Zuletzt</button>
+  </div>
+
+  <!-- Snippets List -->
+  <div id="snippetList" class="list-container">
+    <!-- Populated dynamically -->
+  </div>
+
+  <!-- Footer / Status Bar -->
+  <div class="footer">
+    <div class="footer-left">
+      <div class="brand-title">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+          <path d="M13 7l-3 5h4l-3 5"/>
+        </svg>
+        SatzTresor
+        <span id="versionTag" class="version-pill">v1.3.0</span>
+      </div>
+      <button id="hotstringStatusPill" class="status-pill active" title="Automatisches Ersetzen beim Tippen (Klicken zum Umschalten)">
+        ⚡ Auto
+      </button>
+      <span id="toastMsg" class="toast-msg">✓ Fertig</span>
+    </div>
+    <div class="footer-hints">
+      <div class="hint-item"><span class="badge-kbd">↵</span> Einfügen</div>
+      <div class="hint-item"><span class="badge-kbd">Tab</span> Bearbeiten</div>
+      <div class="hint-item"><span class="badge-kbd">Esc</span> Schließen</div>
+    </div>
+    <div class="footer-right">
+      <div class="layout-selector">
+        <button class="btn-layout" data-layout="sidebar_left" title="Seitlicher Tab (Links andocken)">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line></svg>
+        </button>
+        <button class="btn-layout" data-layout="sidebar_right" title="Seitlicher Tab (Rechts andocken)">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"></rect><line x1="15" y1="3" x2="15" y2="21"></line></svg>
+        </button>
+        <button class="btn-layout" data-layout="center" title="Zentriertes Fenster (Spotlight-Mitte)">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"></rect><rect x="7" y="7" width="10" height="10" rx="1"></rect></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Custom Context Menu (Rechtsklick) -->
+  <div id="contextMenu" class="context-menu">
+    <div class="context-item" id="ctxCopy">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+      Nur kopieren
+    </div>
+    <div class="context-item" id="ctxFavorite">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
+      ⭐ Zu Favoriten
+    </div>
+    <div class="context-item" id="ctxDuplicate">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect></svg>
+      📑 Duplizieren
+    </div>
+    <div class="context-separator"></div>
+    <div class="context-item" id="ctxEdit">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
+      Bearbeiten
+    </div>
+    <div class="context-item danger" id="ctxDelete">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+      Löschen
+    </div>
+  </div>
+
+  <!-- Variable Prompt Modal (Templates) -->
+  <div id="promptModal" class="modal-overlay">
+    <div class="modal-box">
+      <div class="modal-header">
+        <div class="modal-title" id="promptTitle">Baustein anpassen</div>
+        <span class="badge-kbd">Esc zum Abbrechen</span>
+      </div>
+      <div class="modal-body" id="promptFieldsContainer">
+        <!-- Generated inputs -->
+      </div>
+      <div class="modal-footer">
+        <button id="btnCancelPrompt" class="btn btn-secondary">Abbrechen</button>
+        <button id="btnConfirmPrompt" class="btn btn-primary">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="20 6 9 17 4 12"></polyline>
+          </svg>
+          Einfügen
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Snippet Manager Modal -->
+  <div id="managerModal" class="modal-overlay">
+    <div class="modal-box" style="max-width: 640px;">
+      <div class="modal-header">
+        <div class="modal-title" id="managerTitle">Baustein bearbeiten</div>
+        <span class="badge-kbd">Strg+S zum Speichern</span>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="editOriginalTitle">
+        
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+          <div class="form-group">
+            <label class="form-label">Titel / Name</label>
+            <input type="text" id="editTitle" class="form-input" placeholder="z. B. Mit freundlichen Grüßen">
+          </div>
+          <div class="form-group">
+            <label class="form-label" id="editKuerzelLabel">Kürzel (Auto-Ersetzen / Suche)</label>
+            <input type="text" id="editKuerzel" class="form-input" placeholder="z. B. mfg (wird zu ;;mfg)">
+          </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: flex-end;">
+          <div class="form-group">
+            <label class="form-label">Kategorie</label>
+            <input type="text" id="editCategory" class="form-input" placeholder="z. B. E-Mail, Support, Vorlagen..." list="categoriesDatalist">
+            <datalist id="categoriesDatalist"></datalist>
+          </div>
+          <div class="form-group" style="padding-bottom: 8px;">
+            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px;">
+              <input type="checkbox" id="editFavorite" style="width: 16px; height: 16px;">
+              <span>⭐ Zu Favoriten</span>
+            </label>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <label class="form-label">Inhalt</label>
+            <span style="font-size: 11px; color: var(--text-dim);">Platzhalter anklicken zum Einfügen</span>
+          </div>
+          <textarea id="editContent" class="form-textarea" placeholder="Dein Textbaustein..."></textarea>
+          <div class="template-chips">
+            <span class="template-chip" data-insert="{cursor}">{cursor}</span>
+            <span class="template-chip" data-insert="{datum}">{datum}</span>
+            <span class="template-chip" data-insert="{datum:YYYY-MM-DD}">{datum:YYYY-MM-DD}</span>
+            <span class="template-chip" data-insert="{datum:+1d}">{datum:+1d} (Morgen)</span>
+            <span class="template-chip" data-insert="{wochentag}">{wochentag}</span>
+            <span class="template-chip" data-insert="{zeit}">{zeit}</span>
+            <span class="template-chip" data-insert="{clipboard}">{clipboard}</span>
+            <span class="template-chip" data-insert="{?Name}">{?Variable}</span>
+            <span class="template-chip" data-insert="{?Anrede=Frau|Herr|Guten Tag}">{?Dropdown=A|B}</span>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer" style="justify-content: space-between;">
+        <div style="display: flex; gap: 8px;">
+          <button id="btnDeleteSnippet" class="btn btn-danger">Löschen</button>
+          <button id="btnDuplicateFromManager" class="btn btn-secondary">Duplizieren</button>
+        </div>
+        <div style="display: flex; gap: 8px;">
+          <button id="btnCancelManager" class="btn btn-secondary">Abbrechen</button>
+          <button id="btnSaveSnippet" class="btn btn-primary">Speichern</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings Modal -->
+  <div id="settingsModal" class="modal-overlay">
+    <div class="modal-box" style="max-width: 520px;">
+      <div class="modal-header">
+        <div class="modal-title">Einstellungen</div>
+        <span class="badge-kbd">Esc</span>
+      </div>
+      <div class="modal-body" style="gap: 10px;">
+        <div class="settings-section-header">Allgemein & Darstellung</div>
+
+        <div class="settings-row">
+          <div class="settings-label-group">
+            <span class="settings-title">Mit Windows starten</span>
+            <span class="settings-desc">SatzTresor beim Systemstart still im Hintergrund bereitstellen</span>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="settingAutostart">
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <div class="settings-row">
+          <div class="settings-label-group">
+            <span class="settings-title">Erscheinungsbild (Theme)</span>
+            <span class="settings-desc">Wähle zwischen dunklem und hellem Design</span>
+          </div>
+          <select id="settingTheme" class="form-select" style="width: 135px;">
+            <option value="dark">🌙 Dunkel</option>
+            <option value="light">☀️ Hell</option>
+          </select>
+        </div>
+
+        <div class="settings-row">
+          <div class="settings-label-group">
+            <span class="settings-title">Zwischenablage wiederherstellen</span>
+            <span class="settings-desc">Vorherigen kopierten Text nach dem Einfügen beibehalten</span>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="settingRestoreClipboard">
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <div class="settings-section-header" style="margin-top: 6px;">⚡ Automatisches Ersetzen (Hotstrings)</div>
+
+        <div class="settings-row">
+          <div class="settings-label-group">
+            <span class="settings-title">Kürzel beim Tippen automatisch ersetzen</span>
+            <span class="settings-desc" id="hotstringDescPreview">Tippe z. B. ;;mfg in einem beliebigen Programm zum direkten Ersetzen</span>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="settingHotstringsEnabled">
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <div class="settings-row" id="hotstringPrefixRow">
+          <div class="settings-label-group">
+            <span class="settings-title">Auslöse-Präfix</span>
+            <span class="settings-desc">Schützt vor versehentlichem Auslösen mitten im Wort</span>
+          </div>
+          <select id="settingHotstringPrefix" class="form-select" style="width: 165px;">
+            <option value=";;">;; (z. B. ;;mfg)</option>
+            <option value="//">// (z. B. //mfg)</option>
+            <option value="::">:: (z. B. ::mfg)</option>
+            <option value="#"># (z. B. #mfg)</option>
+            <option value="">Kein Standard-Präfix</option>
+          </select>
+        </div>
+
+        <div class="settings-section-header" style="margin-top: 6px;">Aufruf & Tastenkürzel</div>
+
+        <div class="settings-row">
+          <div class="settings-label-group">
+            <span class="settings-title">2× kurz Strg antippen</span>
+            <span class="settings-desc">Zweimal kurz hintereinander Strg drücken (kein Texteingriff, null Konflikte)</span>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="settingDoubleTapCtrl">
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <div class="settings-row">
+          <div class="settings-label-group">
+            <span class="settings-title">Bildschirmrand-Lasche (Maus-Tab)</span>
+            <span class="settings-desc">Dezenter Reiter am Bildschirmrand zum Öffnen per Mausklick (frei verschiebbar)</span>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="settingEdgeTab">
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <div class="settings-row" style="flex-direction: column; align-items: stretch; gap: 8px;">
+          <div class="settings-label-group">
+            <span class="settings-title">Tastenkombinationen</span>
+            <span class="settings-desc">Aktive Kürzel verwalten oder eigene Taste aufnehmen (z. B. Strg+&lt;, Strg+#, F9, Rollen)</span>
+          </div>
+          <div class="hotkey-manager-bar">
+            <div id="activeHotkeysList" class="hotkey-chips-list"></div>
+            <button type="button" id="btnRecordHotkey" class="btn-record-hotkey">
+              ⌨️ + Eigenes Kürzel aufnehmen…
+            </button>
+          </div>
+        </div>
+
+        <div class="settings-section-header" style="margin-top: 6px;">Daten & Sicherheit</div>
+
+        <div>
+          <div style="display: flex; gap: 8px; margin-bottom: 8px;">
+            <button id="btnImportData" class="btn btn-secondary" style="flex: 1; justify-content: center;">
+              📥 Bausteine importieren…
+            </button>
+          </div>
+          <div style="display: flex; gap: 8px;">
+            <button id="btnExportJson" class="btn btn-secondary" style="flex: 1; justify-content: center;">Export JSON</button>
+            <button id="btnExportCsv" class="btn btn-secondary" style="flex: 1; justify-content: center;">Export CSV</button>
+            <button id="btnExportIni" class="btn btn-secondary" style="flex: 1; justify-content: center;">Export INI</button>
+          </div>
+        </div>
+
+        <div style="display: flex; gap: 8px; margin-top: 4px;">
+          <button id="btnOpenCryptoFromSettings" class="btn btn-secondary" style="flex: 1; justify-content: center;">
+            🔒 AES-256 Verschlüsselung
+          </button>
+          <button id="btnLockFromSettings" class="btn btn-secondary" style="display: none; justify-content: center;">
+            🔐 Jetzt sperren
+          </button>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="btnCloseSettings" class="btn btn-primary">Fertig</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Master Password Unlock Modal -->
+  <div id="unlockModal" class="modal-overlay">
+    <div class="modal-box" style="max-width: 440px; text-align: center;">
+      <div style="display: flex; justify-content: center; margin-top: 18px; margin-bottom: 10px;">
+        <div style="width: 48px; height: 48px; border-radius: 12px; background: rgba(59, 130, 246, 0.15); border: 1px solid rgba(59, 130, 246, 0.3); display: flex; align-items: center; justify-content: center; color: var(--accent);">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+          </svg>
+        </div>
+      </div>
+      <div class="modal-title" style="font-size: 18px; margin-bottom: 6px;">SatzTresor entsperren</div>
+      <div style="font-size: 13px; color: var(--text-muted); padding: 0 20px; margin-bottom: 14px;">
+        Die Datenbank ist verschlüsselt. Bitte gib dein Master-Passwort ein:
+      </div>
+      
+      <div class="form-group" style="text-align: left; padding: 0 20px;">
+        <input type="password" id="unlockPassword" class="form-input" placeholder="Master-Passwort eingeben..." autocomplete="current-password">
+        <div id="unlockError" style="color: #ef4444; font-size: 12px; margin-top: 4px; min-height: 16px;"></div>
+      </div>
+
+      <div class="modal-footer" style="justify-content: flex-end; margin-top: 8px; gap: 8px;">
+        <button id="btnExitUnlock" class="btn btn-secondary">Schließen</button>
+        <button id="btnSubmitUnlock" class="btn btn-primary">Entsperren</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Manage Encryption Modal -->
+  <div id="cryptoModal" class="modal-overlay">
+    <div class="modal-box" style="max-width: 460px;">
+      <div class="modal-header">
+        <div class="modal-title" id="cryptoModalTitle">Verschlüsselung verwalten</div>
+        <span class="badge-kbd">Esc</span>
+      </div>
+      <div class="modal-body">
+        <div id="cryptoModeTabs" class="crypto-tabs" style="display: none;">
+          <button id="tabChangePw" class="crypto-tab active" type="button">Passwort ändern</button>
+          <button id="tabRemoveCrypto" class="crypto-tab" type="button">Schutz aufheben</button>
+        </div>
+
+        <div id="cryptoStatusDesc" style="font-size: 13px; color: var(--text-muted);"></div>
+        
+        <div id="encryptFields">
+          <div class="form-group">
+            <label class="form-label">Neues Master-Passwort</label>
+            <input type="password" id="cryptoNewPw" class="form-input" placeholder="Passwort eingeben...">
+          </div>
+          <div class="form-group" style="margin-top: 10px;">
+            <label class="form-label">Passwort wiederholen</label>
+            <input type="password" id="cryptoConfirmPw" class="form-input" placeholder="Passwort bestätigen...">
+          </div>
+        </div>
+
+        <div id="changePwFields" style="display: none;">
+          <div class="form-group">
+            <label class="form-label">Aktuelles Master-Passwort</label>
+            <input type="password" id="cryptoOldPw" class="form-input" placeholder="Bisheriges Passwort...">
+          </div>
+          <div class="form-group" style="margin-top: 10px;">
+            <label class="form-label">Neues Master-Passwort</label>
+            <input type="password" id="cryptoChangeNewPw" class="form-input" placeholder="Neues Passwort...">
+          </div>
+          <div class="form-group" style="margin-top: 10px;">
+            <label class="form-label">Neues Passwort wiederholen</label>
+            <input type="password" id="cryptoChangeConfirmPw" class="form-input" placeholder="Neues Passwort bestätigen...">
+          </div>
+        </div>
+
+        <div id="decryptFields" style="display: none;">
+          <div class="form-group">
+            <label class="form-label">Aktuelles Master-Passwort</label>
+            <input type="password" id="cryptoCurrentPw" class="form-input" placeholder="Master-Passwort zum Entfernen eingeben...">
+          </div>
+        </div>
+
+        <div id="cryptoError" style="color: #ef4444; font-size: 12px; min-height: 16px;"></div>
+      </div>
+      <div class="modal-footer">
+        <button id="btnCancelCrypto" class="btn btn-secondary">Abbrechen</button>
+        <button id="btnApplyCrypto" class="btn btn-primary">Bestätigen</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Non-blocking In-App Confirmation / Alert Modal -->
+  <div id="confirmModal" class="modal-overlay" style="z-index: 80;">
+    <div class="modal-box" style="max-width: 400px;">
+      <div class="modal-header">
+        <div class="modal-title" id="confirmTitle">Bestätigen</div>
+      </div>
+      <div class="modal-body">
+        <div id="confirmMessage" style="font-size: 13.5px; color: var(--text-main); line-height: 1.5;"></div>
+      </div>
+      <div class="modal-footer">
+        <button id="btnConfirmCancel" class="btn btn-secondary">Abbrechen</button>
+        <button id="btnConfirmOk" class="btn btn-primary">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
