@@ -5,7 +5,7 @@
 ### Dein lokaler, verschlüsselter Satzbaustein-Manager für Windows
 **Blitzschnelle Textvorlagen & automatische Kürzel-Ersetzung — 100 % Offline. 0 % Cloud. 0 € Abo.**
 
-[![Version](https://img.shields.io/badge/Version-1.3.0-2563eb?style=for-the-badge)](./package.json)
+[![Version](https://img.shields.io/badge/Version-1.5.3-2563eb?style=for-the-badge)](./package.json)
 [![Plattform](https://img.shields.io/badge/Windows-10%20%2F%2011%20(x64)-0078d4?style=for-the-badge&logo=windows)](./package.json)
 [![Datenschutz](https://img.shields.io/badge/100%25%20Lokal-Zero%20Cloud-10b981?style=for-the-badge)](./PRIVACY.md)
 [![Verschlüsselung](https://img.shields.io/badge/AES--256-PBKDF2%20%2B%20HMAC-8b5cf6?style=for-the-badge)](./src/crypto.js)
@@ -33,7 +33,7 @@ Wähle den passenden Weg für deinen PC:
 | 🟢 Weg 1: Microsoft Store *(Empfohlen für normale PCs)* | 🔵 Weg 2: Direkt-Download *(Für Büro-PCs & Puristen)* |
 | :--- | :--- |
 | **1-Klick-Installation ohne Windows-Warnmeldung**<br>*(Durch Microsoft signiert + automatische Updates)* | **Keine Store-Anmeldung & keine Admin-Rechte nötig**<br>*(Ideal, wenn auf dem Büro-PC der Store gesperrt ist)* |
-| 👉 **[Im Microsoft Store öffnen](#)** *(In Kürze verfügbar)* | 👉 **[SatzTresor-Portable-1.3.0.exe](../../releases/latest)** *(Direktstart ohne Installation / USB-Stick)*<br>👉 **[SatzTresor-Setup-1.3.0.exe](../../releases/latest)** *(Klassischer Windows-Installer)* |
+| 👉 **[Im Microsoft Store öffnen](#)** *(In Kürze verfügbar)* | 👉 **[SatzTresor-Portable-1.5.3.exe](../../releases/latest)** *(Direktstart ohne Installation / USB-Stick)*<br>👉 **[SatzTresor-Setup-1.5.3.exe](../../releases/latest)** *(Klassischer Windows-Installer)* |
 
 <details>
 <summary>💡 <b>Wichtiger Hinweis beim Direkt-Download (.exe): Warum zeigt Windows beim 1. Start ein blaues Fenster?</b> (Hier klicken)</summary>
@@ -74,10 +74,10 @@ Bausteine können dynamische Felder enthalten, die beim Einfügen automatisch au
 * `{?Name}` — Öffnet beim Einfügen ein kleines Eingabefeld für den Namen
 * `{?Anrede=Frau|Herr|Guten Tag}` — Öffnet beim Einfügen eine Schnellauswahl
 
-### 4. Drei Ansichts-Modi & Desktop-Andocken (Pin-Modus)
-* **Sidebar Links / Sidebar Rechts:** Legt sich über die volle Bildschirmhöhe an den Rand.
-* **Spotlight Zentriert:** Schwebendes Suchfenster in der Bildschirmmitte.
-* **📌 Pin-Modus:** Fixiert SatzTresor dauerhaft am Rand und passt den Windows-Arbeitsbereich automatisch an, sodass maximierte Fenster (z. B. Word oder Browser) **neben** SatzTresor ausgerichtet werden statt verdeckt zu sein.
+### 4. Klares Spotlight-Design & Pin-Modus
+* **Zentriertes Spotlight-Fenster:** Ruhiges, aufgeräumtes Suchfenster exakt in der Bildschirmmitte (wahlweise Standard `780×560` oder Kompakt `640×460`).
+* **Sanfter Fokus-Hintergrund:** Der Desktop hinter SatzTresor wird weichgezeichnet und dezent abgedunkelt (Unschärfe & Abdunklung in den Einstellungen stufenlos anpassbar).
+* **📌 Pin-Modus:** Fixiert SatzTresor bei Bedarf dauerhaft frei verschiebbar im Vordergrund (ohne Hintergrund-Abdunklung).
 
 ---
 
@@ -87,11 +87,11 @@ Gerade bei einem Programm, das Textbausteine verwaltet und Tastenkürzel erkennt
 
 | Sicherheits-Merkmal | Nachweis direkt im Quellcode |
 | :--- | :--- |
-| **Null Internet-Zugriff (Air-Gapped UI)** | In [`ui/index.html`](./ui/index.html) erzwingt die Content-Security-Policy `default-src 'self'`. Im gesamten Projekt existiert kein einziger `fetch()`-, `http`- oder WebSocket-Aufruf. |
+| **Isolierte UI & Null Telemetrie** | In [`ui/index.html`](./ui/index.html) erzwingt die Content-Security-Policy `default-src 'self'`. Es werden niemals Satzbausteine oder Nutzungsdaten übertragen; lediglich die optionale Update-Prüfung ([`src/updater.js`](./src/updater.js), jederzeit abschaltbar) prüft öffentliche GitHub-Releases inkl. SHA-512-Hash. |
 | **Geprüfte AES-256-Verschlüsselung** | [`src/crypto.js`](./src/crypto.js) nutzt ausschließlich das native Node.js-`crypto`-Modul mit `AES-256-CBC`, `PBKDF2-SHA256` (100.000 Iterationen, 16-Byte Zufalls-Salt) und `HMAC-SHA256` (Encrypt-then-MAC mit `timingSafeEqual`). |
 | **Schutz vor Windows-Zwischenablageverlauf (`Win + V`)** | [`src/win32.js`](./src/win32.js) markiert eingefügte Bausteine über die offiziellen Windows-Clipboard-Formate als privat, damit sensible Texte weder in `Win + V` noch in der Microsoft-Cloud landen. |
-| **Minimale Abhängigkeiten (Supply-Chain-Schutz)** | [`package.json`](./package.json) besitzt nur **eine einzige** Laufzeit-Abhängigkeit (`koffi` für die direkte Windows-API-Anbindung ohne C++-Kompilierungs-Ballast). |
-| **Öffentlicher Build-Prozess** | [`.github/workflows/release.yml`](./.github/workflows/release.yml) baut die `.exe`-Dateien direkt auf den GitHub-Servern aus diesem Quellcode und erzeugt `SHA256SUMS.txt`-Prüfsummen. |
+| **Schlanke Abhängigkeiten (Supply-Chain-Schutz)** | [`package.json`](./package.json) nutzt zur Laufzeit lediglich `koffi` (native Windows-API-Anbindung) und `electron-updater` (verifizierte Delta-Updates via GitHub Releases). |
+| **Öffentlicher Build-Prozess** | [`.github/workflows/release.yml`](./.github/workflows/release.yml) baut die `.exe`-Dateien samt `latest.yml` und `.blockmap` direkt auf den GitHub-Servern aus diesem Quellcode und erzeugt `SHA256SUMS.txt`-Prüfsummen. |
 
 ---
 
@@ -101,7 +101,7 @@ Voraussetzung: **Windows 10/11 (x64)** und **[Node.js](https://nodejs.org/) (LTS
 
 ```bash
 # 1. Repository klonen
-git clone https://github.com/satztresor/satztresor.git
+git clone https://github.com/100xla/satztresor.git
 cd satztresor
 
 # 2. Abhängigkeiten installieren

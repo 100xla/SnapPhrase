@@ -7,7 +7,14 @@
   <title>SatzTresor</title>
   <link rel="stylesheet" href="style.css">
 </head>
-<body>
+<body class="mode-center">
+
+  <div id="screenBackdrop" class="screen-backdrop" aria-hidden="true">
+    <img id="screenBackdropImg" class="screen-backdrop-img" alt="" draggable="false">
+    <div class="screen-backdrop-tint"></div>
+  </div>
+  <div id="screenStage" class="screen-stage">
+    <div id="appShell" class="app-shell">
 
   <!-- Top Search Bar -->
   <div class="search-container">
@@ -26,13 +33,13 @@
           <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
         </svg>
       </button>
-      <button id="btnPinWindow" class="btn-pin" title="SatzTresor fixieren (Desktop passt sich an / Fenster bleibt offen)">
+      <button id="btnPinWindow" class="btn-pin" title="SatzTresor im Vordergrund fixieren (Fenster bleibt offen)">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <line x1="12" y1="17" x2="12" y2="22"></line>
           <path d="M5 17h14v-2l-2-3V6a2 2 0 0 0-2-2h-6a2 2 0 0 0-2 2v6l-2 3v2z"></path>
         </svg>
       </button>
-      <button id="btnToggleWidth" class="btn-pin" title="Tab-Breite anpassen (Kompakt: 320px / Standard: 440px)">
+      <button id="btnToggleWidth" class="btn-pin" title="Fenstergröße umschalten (Standard / Kompakt)">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="4 14 10 14 10 20"></polyline>
           <polyline points="20 10 14 10 14 4"></polyline>
@@ -50,9 +57,10 @@
           <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
         </svg>
       </button>
-      <button id="btnCollapseWindow" class="btn-pin" title="SatzTresor einklappen (Esc)">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-          <line x1="5" y1="12" x2="19" y2="12"></line>
+      <button id="btnCollapseWindow" class="btn-pin" title="Ausblenden (Esc)">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="18" y1="6" x2="6" y2="18"></line>
+          <line x1="6" y1="6" x2="18" y2="18"></line>
         </svg>
       </button>
     </div>
@@ -79,8 +87,12 @@
           <path d="M13 7l-3 5h4l-3 5"/>
         </svg>
         SatzTresor
-        <span id="versionTag" class="version-pill">v1.3.0</span>
+        <span id="versionTag" class="version-pill">v1.5.3</span>
       </div>
+      <button id="updateReadyPill" class="update-ready-pill" style="display: none;" title="Update jetzt installieren und neu starten">
+        <span class="update-dot"></span>
+        <span id="updateReadyLabel">Update bereit</span>
+      </button>
       <button id="hotstringStatusPill" class="status-pill active" title="Automatisches Ersetzen beim Tippen (Klicken zum Umschalten)">
         ⚡ Auto
       </button>
@@ -90,19 +102,6 @@
       <div class="hint-item"><span class="badge-kbd">↵</span> Einfügen</div>
       <div class="hint-item"><span class="badge-kbd">Tab</span> Bearbeiten</div>
       <div class="hint-item"><span class="badge-kbd">Esc</span> Schließen</div>
-    </div>
-    <div class="footer-right">
-      <div class="layout-selector">
-        <button class="btn-layout" data-layout="sidebar_left" title="Seitlicher Tab (Links andocken)">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line></svg>
-        </button>
-        <button class="btn-layout" data-layout="sidebar_right" title="Seitlicher Tab (Rechts andocken)">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"></rect><line x1="15" y1="3" x2="15" y2="21"></line></svg>
-        </button>
-        <button class="btn-layout" data-layout="center" title="Zentriertes Fenster (Spotlight-Mitte)">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"></rect><rect x="7" y="7" width="10" height="10" rx="1"></rect></svg>
-        </button>
-      </div>
     </div>
   </div>
 
@@ -252,6 +251,35 @@
           </select>
         </div>
 
+        <div class="settings-row" id="backdropModeRow">
+          <div class="settings-label-group">
+            <span class="settings-title">Hintergrund beim Aufruf</span>
+            <span class="settings-desc">Hintergrund hinter der App weichzeichnen und sanft abdunkeln</span>
+          </div>
+          <select id="settingBackdropMode" class="form-select" style="width: 215px;">
+            <option value="blur">🌫️ Unscharf &amp; abgedunkelt</option>
+            <option value="solid">🌑 Vollständig ausblenden (Fokus)</option>
+            <option value="off">🪟 Transparent (Kein Effekt)</option>
+          </select>
+        </div>
+
+        <div id="backdropBlurConfigPanel" class="backdrop-blur-tune-panel">
+          <div class="edge-offset-wrap">
+            <div class="edge-offset-label-row">
+              <span>Unschärfe</span>
+              <span id="backdropBlurPercentValue" class="edge-offset-badge">65 %</span>
+            </div>
+            <input type="range" id="settingBackdropBlurPercent" class="edge-range-input" min="0" max="100" step="5" value="65">
+          </div>
+          <div class="edge-offset-wrap">
+            <div class="edge-offset-label-row">
+              <span>Abdunklung</span>
+              <span id="backdropDimPercentValue" class="edge-offset-badge">60 %</span>
+            </div>
+            <input type="range" id="settingBackdropDimPercent" class="edge-range-input" min="0" max="90" step="5" value="60">
+          </div>
+        </div>
+
         <div class="settings-row">
           <div class="settings-label-group">
             <span class="settings-title">Zwischenablage wiederherstellen</span>
@@ -303,15 +331,85 @@
           </label>
         </div>
 
-        <div class="settings-row">
+        <div class="settings-row" style="border-bottom: none; padding-bottom: 4px;">
           <div class="settings-label-group">
-            <span class="settings-title">Bildschirmrand-Lasche (Maus-Tab)</span>
-            <span class="settings-desc">Dezenter Reiter am Bildschirmrand zum Öffnen per Mausklick (frei verschiebbar)</span>
+            <span class="settings-title">Bildschirmrand- &amp; Ecken-Lasche (Maus-Tab)</span>
+            <span class="settings-desc">An allen 4 Rändern oder als Dreieck in den Ecken (frei ziehbar &amp; einstellbar)</span>
           </div>
           <label class="switch">
             <input type="checkbox" id="settingEdgeTab">
             <span class="slider"></span>
           </label>
+        </div>
+
+        <div id="edgeTabConfigPanel" class="edge-tab-config-panel">
+          <div class="edge-mini-monitor-wrap">
+            <div id="edgeTabMiniMonitor" class="edge-mini-monitor" aria-label="Position am Bildschirm wählen">
+              <div class="edge-mini-taskbar" aria-hidden="true"></div>
+              <span id="edgeMiniCaption" class="edge-mini-caption">Links · 42 %</span>
+
+              <!-- 4 Corner Triangles -->
+              <button type="button" class="edge-spot corner spot-top-left" data-pos="top-left" title="◤ Ecke oben links (Dreieck)"></button>
+              <button type="button" class="edge-spot corner spot-top-right" data-pos="top-right" title="◥ Ecke oben rechts (Dreieck)"></button>
+              <button type="button" class="edge-spot corner spot-bottom-left" data-pos="bottom-left" title="◣ Ecke unten links (Dreieck)"></button>
+              <button type="button" class="edge-spot corner spot-bottom-right" data-pos="bottom-right" title="◢ Ecke unten rechts (Dreieck)"></button>
+
+              <!-- 4 Screen Edges -->
+              <button type="button" class="edge-spot side spot-top" data-pos="top" title="▲ Oberer Bildschirmrand"><span class="spot-pill"></span></button>
+              <button type="button" class="edge-spot side spot-bottom" data-pos="bottom" title="▼ Unterer Bildschirmrand"><span class="spot-pill"></span></button>
+              <button type="button" class="edge-spot side spot-left active" data-pos="left" title="◀ Linker Bildschirmrand"><span class="spot-pill"></span></button>
+              <button type="button" class="edge-spot side spot-right" data-pos="right" title="▶ Rechter Bildschirmrand"><span class="spot-pill"></span></button>
+            </div>
+            <span class="edge-mini-subhint">Ecke oder Rand anklicken</span>
+          </div>
+
+          <div class="edge-tab-controls-col">
+            <div class="edge-ctrl-row">
+              <select id="settingEdgeTabPosition" class="form-select edge-ctrl-select" title="Position der Startlasche">
+                <optgroup label="Display-Ecken (Dreieck)">
+                  <option value="top-left">◤ Ecke oben links (Dreieck)</option>
+                  <option value="top-right">◥ Ecke oben rechts (Dreieck)</option>
+                  <option value="bottom-left">◣ Ecke unten links (Dreieck)</option>
+                  <option value="bottom-right">◢ Ecke unten rechts (Dreieck)</option>
+                </optgroup>
+                <optgroup label="Bildschirmränder (Lasche)">
+                  <option value="left">◀ Linker Bildschirmrand</option>
+                  <option value="right">▶ Rechter Bildschirmrand</option>
+                  <option value="top">▲ Oberer Bildschirmrand</option>
+                  <option value="bottom">▼ Unterer Bildschirmrand</option>
+                </optgroup>
+              </select>
+            </div>
+
+            <div id="edgeTabOffsetWrap" class="edge-offset-wrap">
+              <div class="edge-offset-label-row">
+                <span id="edgeTabOffsetAxisLabel">Position am Rand (Vertikal)</span>
+                <span id="edgeTabOffsetValue" class="edge-offset-badge">42 %</span>
+              </div>
+              <input type="range" id="settingEdgeTabOffset" class="edge-range-input" min="5" max="95" step="1" value="42">
+            </div>
+
+            <div id="edgeTabCornerHint" class="edge-corner-hint" style="display: none;">
+              📐 Dreieck sitzt passgenau in der Display-Ecke
+            </div>
+
+            <div class="edge-ctrl-inline-row">
+              <select id="settingEdgeTabSize" class="form-select edge-size-select" title="Größe der Lasche / des Dreiecks">
+                <option value="compact">Größe: Kompakt</option>
+                <option value="standard" selected>Größe: Standard</option>
+                <option value="large">Größe: Groß</option>
+              </select>
+
+              <label class="edge-lock-chip" title="Verhindert versehentliches Verschieben mit der Maus">
+                <input type="checkbox" id="settingEdgeTabLocked">
+                <span>🔒 Fixieren</span>
+              </label>
+            </div>
+
+            <div id="edgeTabDisplayWrap" class="edge-ctrl-row" style="display: none;">
+              <select id="settingEdgeTabDisplay" class="form-select edge-ctrl-select" title="Bildschirm für Lasche auswählen"></select>
+            </div>
+          </div>
         </div>
 
         <div class="settings-row" style="flex-direction: column; align-items: stretch; gap: 8px;">
@@ -349,6 +447,43 @@
           <button id="btnLockFromSettings" class="btn btn-secondary" style="display: none; justify-content: center;">
             🔐 Jetzt sperren
           </button>
+        </div>
+
+        <div class="settings-section-header" style="margin-top: 6px;">Softwareupdate</div>
+
+        <div class="settings-row update-status-card">
+          <div class="settings-label-group" style="flex: 1; min-width: 0;">
+            <span class="settings-title" id="updateStatusHeadline">SatzTresor v1.5.3</span>
+            <span class="settings-desc" id="updateStatusDesc">Automatische Hintergrund-Updates bereit</span>
+            <div id="updateProgressWrap" class="update-progress-wrap" style="display: none;">
+              <div id="updateProgressBar" class="update-progress-bar" style="width: 0%;"></div>
+            </div>
+          </div>
+          <button type="button" id="btnUpdateAction" class="btn btn-secondary btn-update-action">
+            Jetzt prüfen
+          </button>
+        </div>
+
+        <div class="settings-row">
+          <div class="settings-label-group">
+            <span class="settings-title">Updates automatisch herunterladen</span>
+            <span class="settings-desc">Neue Versionen still im Hintergrund laden und beim Beenden installieren</span>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="settingAutoUpdate" checked>
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <div class="settings-row" id="updateRepoRow" style="gap: 8px;">
+          <div class="settings-label-group" style="flex: 1; min-width: 0;">
+            <span class="settings-title">GitHub Update-Quelle</span>
+            <span class="settings-desc">Öffentliches Repository für Releases (Standard: 100xla/satztresor)</span>
+          </div>
+          <div style="display: flex; gap: 6px; align-items: center;">
+            <input type="text" id="settingUpdateRepo" class="form-input" placeholder="100xla/satztresor" spellcheck="false" style="width: 155px; padding: 5px 9px; font-size: 12px;">
+            <button type="button" id="btnSaveUpdateRepo" class="btn btn-secondary" style="padding: 5px 10px; font-size: 12px;">Speichern</button>
+          </div>
         </div>
       </div>
       <div class="modal-footer">
@@ -457,6 +592,9 @@
       </div>
     </div>
   </div>
+
+    </div><!-- /#appShell -->
+  </div><!-- /#screenStage -->
 
   <script src="app.js"></script>
 </body>

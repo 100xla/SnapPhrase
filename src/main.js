@@ -1,13 +1,14 @@
 /**
- * SatzTresor v1.3.0 — Main Process
+ * SatzTresor v1.5.3 — Main Process
  * Supports:
- * - Sidebar Mode (Left / Right docked tab over full screen height) & Spotlight Mode (Centered)
+ * - Centered Spotlight Mode (Apple-inspired floating palette with smooth blurred & dimmed desktop backdrop)
+ * - Automatic Background Updates via GitHub Releases & NSIS Delta Updates (electron-updater)
  * - Triggers:
  *   1. Double-Tap Ctrl (2x quick Ctrl tap — zero text interference, zero conflicts)
  *   2. Draggable Edge-Tab Handle at screen edge (mouse-only 1-click access without stealing focus)
  *   3. Freely recordable Global Hotkeys + System Tray
  * - Global Hotstring Engine: Optional real-time text expansion (e.g. ;;mfg) across Windows apps
- * - Features: Pinning, Multi-Monitor DPI-aware docking, Favorites, Duplication, Date/Time/Variable templates,
+ * - Features: Pinning, Multi-Monitor DPI-aware centering, Favorites, Duplication, Date/Time/Variable templates,
  *   Silent Windows Autostart (--hidden), Clipboard protection & restoration, AES-256 encryption (lock & password change),
  *   and JSON/CSV/INI export & import.
  */
@@ -29,21 +30,54 @@ const path = require('path');
 const fs = require('fs');
 const Storage = require('./storage');
 const win32 = require('./win32');
+const { SatzTresorUpdater } = require('./updater');
 
 const APP_NAME = 'SatzTresor';
-const APP_VERSION = '1.3.0';
-const EDGE_TAB_WIDTH = 20;
-const EDGE_TAB_HEIGHT = 72;
+const APP_VERSION = '1.5.3';
+const EDGE_TAB_CORNER_SNAP_PX = 56;
+const EDGE_TAB_EDGE_MARGIN_PX = 16;
+const CENTER_WIDTH_STANDARD = 780;
+const CENTER_HEIGHT_STANDARD = 560;
+const CENTER_WIDTH_COMPACT = 640;
+const CENTER_HEIGHT_COMPACT = 460;
+const CLOSE_ANIMATION_MS = 195;
+const SHOW_PREPARE_TIMEOUT_MS = 40;
+
+const EDGE_TAB_POSITION_LABELS = {
+  'top-left': '◤ Ecke oben links (Dreieck)',
+  'top-right': '◥ Ecke oben rechts (Dreieck)',
+  'bottom-left': '◣ Ecke unten links (Dreieck)',
+  'bottom-right': '◢ Ecke unten rechts (Dreieck)',
+  left: '◀ Linker Bildschirmrand',
+  right: '▶ Rechter Bildschirmrand',
+  top: '▲ Oberer Bildschirmrand',
+  bottom: '▼ Unterer Bildschirmrand',
+};
 
 let mainWindow = null;
 let edgeTabWindow = null;
+let lastEdgeTabIgnoreMouse = null;
+let lastSentEdgeTabVisualKey = '';
+let isDraggingEdgeTab = false;
+let liveDragEdgeTabState = null;
 let tray = null;
 let currentTrayMenu = null;
+let updater = null;
 let isQuitting = false;
 let isSystemDialogOpen = false;
 let isRecordingHotkey = false;
 let hotstringTriggers = [];
 let pendingPromptClipboard = null;
+let isMainRendererReady = false;
+let pendingShowRequest = null;
+let hideAnimationTimer = null;
+let pendingShowFallbackTimer = null;
+let pendingShowContext = null;
+let isPendingShow = false;
+let showSequenceCounter = 0;
+let isClosingAnimation = false;
+let rendererDataDirty = true;
+let currentBackdropSnapshot = null;
 
 const hasCustomUserDataArg = process.argv.some((arg) => arg.startsWith('--user-data-dir'));
 const launchedHidden =
@@ -119,7 +153,7 @@ if (!hasCustomUserDataArg) {
   }
 
   app.on('second-instance', () => {
-    toggleWindow(true);
+    toggleWindow(true, 'auto');
   });
 }
 
@@ -198,18 +232,103 @@ function getOwnWindowHwnds() {
   return [getMainWindowHwnd(), getEdgeTabHwnd()].filter(Boolean);
 }
 
-function getActiveDisplayContext() {
-  const cursorPoint = screen.getCursorScreenPoint();
-  const activeDisplay = screen.getDisplayNearestPoint(cursorPoint);
+function setWindowBoundsSafe(win, bounds) {
+  if (!win || win.isDestroyed() || !bounds) return;
+  const target = {
+    x: Math.round(bounds.x),
+    y: Math.round(bounds.y),
+    width: Math.max(1, Math.round(bounds.width)),
+    height: Math.max(1, Math.round(bounds.height)),
+  };
+  const current = win.getBounds();
+  if (
+    current.x === target.x &&
+    current.y === target.y &&
+    current.width === target.width &&
+    current.height === target.height
+  ) {
+    return;
+  }
+
+  // Never toggle setResizable(true/false) on transparent frameless Windows BrowserWindows,
+  // as mutating WS_THICKFRAME breaks DWM DirectComposition alpha and paints a black background.
+  win.setBounds(target, false);
+  // Second pass ensures exact DIP sizing when moving across monitors with different DPI scaleFactors on Windows
+  const after = win.getBounds();
+  if (
+    after.x !== target.x ||
+    after.y !== target.y ||
+    after.width !== target.width ||
+    after.height !== target.height
+  ) {
+    win.setBounds(target, false);
+  }
+}
+
+function getCenterDimensions(bounds) {
+  const isCompact = storage.getCenterCompact();
+  const maxW = Math.max(360, bounds.width - 48);
+  const maxH = Math.max(320, bounds.height - 48);
+  const width = Math.min(isCompact ? CENTER_WIDTH_COMPACT : CENTER_WIDTH_STANDARD, maxW);
+  const height = Math.min(isCompact ? CENTER_HEIGHT_COMPACT : CENTER_HEIGHT_STANDARD, maxH);
+  return { width, height };
+}
+
+function getActiveDisplayContext(triggerSource = 'auto') {
+  let targetPoint = null;
+
+  if (triggerSource !== 'mouse') {
+    const fgCenterPhys = win32.getWindowCenterPhysical(win32.getLastForegroundWindow());
+    if (fgCenterPhys) {
+      try {
+        targetPoint = screen.screenToDipPoint(fgCenterPhys);
+      } catch (e) {
+        targetPoint = fgCenterPhys;
+      }
+    }
+  }
+
+  if (!targetPoint) {
+    targetPoint = screen.getCursorScreenPoint();
+  }
+
   const primaryDisplay = screen.getPrimaryDisplay();
+  const activeDisplay = screen.getDisplayNearestPoint(targetPoint) || primaryDisplay;
   const scaleFactor = activeDisplay.scaleFactor || 1;
+  const bounds = activeDisplay.bounds;
   const workArea = activeDisplay.workArea;
+
+  // Full monitor overlay minus 1px in height so Windows DWM never mistakes the transparent window
+  // for an exclusive fullscreen surface (which forces a black background on Windows)
+  const overlayBounds = {
+    x: bounds.x,
+    y: bounds.y,
+    width: bounds.width,
+    height: Math.max(1, bounds.height - 1),
+  };
+
+  // Usable workArea insets inside full display bounds (used when docking unpinned sidebars)
+  const workAreaInsets = {
+    top: Math.max(0, workArea.y - bounds.y),
+    bottom: Math.max(0, bounds.y + bounds.height - (workArea.y + workArea.height)),
+    left: Math.max(0, workArea.x - bounds.x),
+    right: Math.max(0, bounds.x + bounds.width - (workArea.x + workArea.width)),
+  };
 
   return {
     activeDisplay,
     isPrimary: activeDisplay.id === primaryDisplay.id,
     scaleFactor,
+    bounds,
     workArea,
+    overlayBounds,
+    workAreaInsets,
+    physicalBounds: {
+      x: Math.round(bounds.x * scaleFactor),
+      y: Math.round(bounds.y * scaleFactor),
+      width: Math.round(bounds.width * scaleFactor),
+      height: Math.round(bounds.height * scaleFactor),
+    },
     physicalWorkArea: {
       x: Math.round(workArea.x * scaleFactor),
       y: Math.round(workArea.y * scaleFactor),
@@ -219,62 +338,355 @@ function getActiveDisplayContext() {
   };
 }
 
-function getBoundsForLayout(mode) {
-  const { workArea } = getActiveDisplayContext();
-  const sidebarWidth = storage.getSidebarWidth();
+function getPinnedBoundsForLayout(_mode, ctx = getActiveDisplayContext()) {
+  const { bounds, workArea } = ctx;
+  const { width: centerW, height: centerH } = getCenterDimensions(bounds);
+  // Center on exact physical display bounds, clamped to usable workArea so taskbar never covers it
+  const exactX = Math.round(bounds.x + (bounds.width - centerW) / 2);
+  const exactY = Math.round(bounds.y + (bounds.height - centerH) / 2);
+  const minX = workArea.x;
+  const maxX = Math.max(minX, workArea.x + workArea.width - centerW);
+  const minY = workArea.y;
+  const maxY = Math.max(minY, workArea.y + workArea.height - centerH);
+  return {
+    x: Math.max(minX, Math.min(maxX, exactX)),
+    y: Math.max(minY, Math.min(maxY, exactY)),
+    width: centerW,
+    height: centerH,
+  };
+}
 
-  switch (mode) {
-    case 'sidebar_right':
-      return {
-        x: workArea.x + workArea.width - sidebarWidth,
-        y: workArea.y,
-        width: sidebarWidth,
-        height: workArea.height,
-      };
-    case 'center': {
-      const centerW = 720;
-      const centerH = 540;
-      return {
-        x: Math.round(workArea.x + (workArea.width - centerW) / 2),
-        y: Math.round(workArea.y + (workArea.height - centerH) / 2),
-        width: centerW,
-        height: centerH,
-      };
-    }
-    case 'sidebar_left':
-    default:
-      return {
-        x: workArea.x,
-        y: workArea.y,
-        width: sidebarWidth,
-        height: workArea.height,
-      };
+function getTargetWindowBounds(mode, isPinned, ctx) {
+  if (isPinned) {
+    return getPinnedBoundsForLayout(mode, ctx);
+  }
+  return ctx.overlayBounds;
+}
+
+function isWindowEffectivelyVisible() {
+  return Boolean(
+    mainWindow &&
+      !mainWindow.isDestroyed() &&
+      (isPendingShow || (mainWindow.isVisible() && !isClosingAnimation))
+  );
+}
+
+function syncNativeBackdrop() {
+  const hwnd = getMainWindowHwnd();
+  if (!hwnd) return;
+  win32.setWindowBackdropEffect(hwnd, {
+    mode: storage.getBackdropMode(),
+    theme: storage.getTheme(),
+    isPinned: storage.isPinned(),
+    useSnapshotBlur: Boolean(currentBackdropSnapshot),
+  });
+}
+
+function cancelPendingShow() {
+  if (pendingShowFallbackTimer) {
+    clearTimeout(pendingShowFallbackTimer);
+    pendingShowFallbackTimer = null;
+  }
+  pendingShowContext = null;
+  isPendingShow = false;
+}
+
+function cancelHideAnimation() {
+  cancelPendingShow();
+  if (hideAnimationTimer) {
+    clearTimeout(hideAnimationTimer);
+    hideAnimationTimer = null;
+  }
+  isClosingAnimation = false;
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    try {
+      mainWindow.setIgnoreMouseEvents(false);
+    } catch (e) {}
+    syncNativeBackdrop();
   }
 }
 
-// ============================================================================
-// Edge-Tab Handle Window (Mouse Screen-Edge Handle)
-// ============================================================================
-function getEdgeTabSide() {
-  return storage.getLayoutMode() === 'sidebar_right' ? 'right' : 'left';
-}
+function syncWindowGeometry(triggerSource = 'auto', existingCtx = null) {
+  if (!mainWindow || mainWindow.isDestroyed()) return null;
+  const ctx = existingCtx || getActiveDisplayContext(triggerSource);
+  const isPinned = storage.isPinned();
+  const layoutMode = storage.getLayoutMode();
+  const targetBounds = getTargetWindowBounds(layoutMode, isPinned, ctx);
 
-function getEdgeTabBounds(customY = null) {
-  const primary = screen.getPrimaryDisplay();
-  const wa = primary.workArea;
-  const side = getEdgeTabSide();
-  const x = side === 'right' ? wa.x + wa.width - EDGE_TAB_WIDTH : wa.x;
-
-  let y;
-  if (typeof customY === 'number') {
-    y = Math.max(wa.y + 16, Math.min(wa.y + wa.height - EDGE_TAB_HEIGHT - 16, Math.round(customY - EDGE_TAB_HEIGHT / 2)));
+  if (isPinned) {
+    syncNativeBackdrop();
+    setWindowBoundsSafe(mainWindow, targetBounds);
+    mainWindow.setAlwaysOnTop(true, 'floating');
   } else {
-    const pct = storage.getEdgeTabYPercent() / 100;
-    y = Math.round(wa.y + (wa.height - EDGE_TAB_HEIGHT) * pct);
-    y = Math.max(wa.y + 16, Math.min(wa.y + wa.height - EDGE_TAB_HEIGHT - 16, y));
+    mainWindow.setAlwaysOnTop(true, 'screen-saver');
+    setWindowBoundsSafe(mainWindow, targetBounds);
+    win32.applyFullscreenOverlayBounds(getMainWindowHwnd(), ctx.physicalBounds);
+    syncNativeBackdrop();
   }
 
-  return { x, y, width: EDGE_TAB_WIDTH, height: EDGE_TAB_HEIGHT, workArea: wa };
+  if (mainWindow.webContents && !mainWindow.webContents.isLoading()) {
+    mainWindow.webContents.send('satztresor-msg', {
+      type: 'updateInsets',
+      insets: ctx.workAreaInsets,
+    });
+  }
+  return ctx;
+}
+
+// ============================================================================
+// Edge-Tab & Corner-Triangle Handle Window (All 4 Edges + All 4 Corners)
+// ============================================================================
+function isCornerEdgeTabPosition(pos) {
+  return (
+    pos === 'top-left' ||
+    pos === 'top-right' ||
+    pos === 'bottom-left' ||
+    pos === 'bottom-right'
+  );
+}
+
+function getEdgeTabDimensions(position, size = 'standard') {
+  if (isCornerEdgeTabPosition(position)) {
+    if (size === 'compact') return { width: 28, height: 28 };
+    if (size === 'large') return { width: 48, height: 48 };
+    return { width: 36, height: 36 };
+  }
+
+  const isHorizontal = position === 'top' || position === 'bottom';
+  if (size === 'compact') {
+    return isHorizontal ? { width: 56, height: 20 } : { width: 20, height: 56 };
+  }
+  if (size === 'large') {
+    return isHorizontal ? { width: 92, height: 28 } : { width: 28, height: 92 };
+  }
+  return isHorizontal ? { width: 72, height: 24 } : { width: 24, height: 72 };
+}
+
+function getDisplaysSummary() {
+  const primary = screen.getPrimaryDisplay();
+  return screen.getAllDisplays().map((d, idx) => {
+    const isPrimary = d.id === primary.id;
+    const res = `${d.bounds.width}×${d.bounds.height}`;
+    return {
+      id: String(d.id),
+      isPrimary,
+      label: isPrimary ? `Hauptbildschirm (${res})` : `Monitor ${idx + 1} (${res})`,
+    };
+  });
+}
+
+function getEdgeTabTargetDisplay(customDisplayId = null) {
+  const primary = screen.getPrimaryDisplay();
+  const wantedId =
+    customDisplayId !== null && customDisplayId !== undefined
+      ? String(customDisplayId).trim()
+      : storage.getEdgeTabDisplayId();
+
+  if (wantedId) {
+    const match = screen.getAllDisplays().find((d) => String(d.id) === wantedId);
+    if (match) return match;
+  }
+  return primary;
+}
+
+function getEdgeTabBounds(override = null) {
+  const position = (override && override.position) || storage.getEdgeTabPosition();
+  const size = (override && override.size) || storage.getEdgeTabSize();
+  const offsetPercent =
+    override && typeof override.offsetPercent === 'number'
+      ? override.offsetPercent
+      : storage.getEdgeTabOffsetPercent();
+  const display = getEdgeTabTargetDisplay(override ? override.displayId : null);
+  const wa = display.workArea;
+  const { width, height } = getEdgeTabDimensions(position, size);
+
+  const clampedPct = Math.max(5, Math.min(95, offsetPercent));
+  const t = (clampedPct - 5) / 90;
+
+  let x = wa.x;
+  let y = wa.y;
+
+  switch (position) {
+    case 'top-left':
+      x = wa.x;
+      y = wa.y;
+      break;
+    case 'top-right':
+      x = wa.x + wa.width - width;
+      y = wa.y;
+      break;
+    case 'bottom-left':
+      x = wa.x;
+      y = wa.y + wa.height - height;
+      break;
+    case 'bottom-right':
+      x = wa.x + wa.width - width;
+      y = wa.y + wa.height - height;
+      break;
+    case 'top': {
+      const minX = wa.x + EDGE_TAB_EDGE_MARGIN_PX;
+      const maxX = Math.max(minX, wa.x + wa.width - width - EDGE_TAB_EDGE_MARGIN_PX);
+      x = Math.round(minX + (maxX - minX) * t);
+      y = wa.y;
+      break;
+    }
+    case 'bottom': {
+      const minX = wa.x + EDGE_TAB_EDGE_MARGIN_PX;
+      const maxX = Math.max(minX, wa.x + wa.width - width - EDGE_TAB_EDGE_MARGIN_PX);
+      x = Math.round(minX + (maxX - minX) * t);
+      y = wa.y + wa.height - height;
+      break;
+    }
+    case 'right': {
+      const minY = wa.y + EDGE_TAB_EDGE_MARGIN_PX;
+      const maxY = Math.max(minY, wa.y + wa.height - height - EDGE_TAB_EDGE_MARGIN_PX);
+      x = wa.x + wa.width - width;
+      y = Math.round(minY + (maxY - minY) * t);
+      break;
+    }
+    case 'left':
+    default: {
+      const minY = wa.y + EDGE_TAB_EDGE_MARGIN_PX;
+      const maxY = Math.max(minY, wa.y + wa.height - height - EDGE_TAB_EDGE_MARGIN_PX);
+      x = wa.x;
+      y = Math.round(minY + (maxY - minY) * t);
+      break;
+    }
+  }
+
+  return {
+    x,
+    y,
+    width,
+    height,
+    workArea: wa,
+    displayId: String(display.id),
+    isPrimaryDisplay: display.id === screen.getPrimaryDisplay().id,
+    position,
+    offsetPercent: clampedPct,
+    size,
+  };
+}
+
+function computeEdgeTabSnapFromCursor(fallbackData = null) {
+  let cursorPt = null;
+  try {
+    cursorPt = screen.getCursorScreenPoint();
+  } catch (e) {}
+
+  if (
+    !cursorPt &&
+    fallbackData &&
+    typeof fallbackData.screenX === 'number' &&
+    typeof fallbackData.screenY === 'number'
+  ) {
+    cursorPt = { x: fallbackData.screenX, y: fallbackData.screenY };
+  }
+  if (!cursorPt) {
+    return null;
+  }
+
+  const primary = screen.getPrimaryDisplay();
+  const display = screen.getDisplayNearestPoint(cursorPt) || primary;
+  const wa = display.workArea;
+  const size = storage.getEdgeTabSize();
+
+  const cx = Math.max(wa.x, Math.min(wa.x + wa.width, cursorPt.x));
+  const cy = Math.max(wa.y, Math.min(wa.y + wa.height, cursorPt.y));
+
+  const dLeft = cx - wa.x;
+  const dRight = wa.x + wa.width - cx;
+  const dTop = cy - wa.y;
+  const dBottom = wa.y + wa.height - cy;
+
+  let position = 'left';
+  let offsetPercent = storage.getEdgeTabOffsetPercent();
+
+  if (dLeft <= EDGE_TAB_CORNER_SNAP_PX && dTop <= EDGE_TAB_CORNER_SNAP_PX) {
+    position = 'top-left';
+  } else if (dRight <= EDGE_TAB_CORNER_SNAP_PX && dTop <= EDGE_TAB_CORNER_SNAP_PX) {
+    position = 'top-right';
+  } else if (dLeft <= EDGE_TAB_CORNER_SNAP_PX && dBottom <= EDGE_TAB_CORNER_SNAP_PX) {
+    position = 'bottom-left';
+  } else if (dRight <= EDGE_TAB_CORNER_SNAP_PX && dBottom <= EDGE_TAB_CORNER_SNAP_PX) {
+    position = 'bottom-right';
+  } else {
+    const minDist = Math.min(dLeft, dRight, dTop, dBottom);
+    if (minDist === dTop) {
+      position = 'top';
+    } else if (minDist === dBottom) {
+      position = 'bottom';
+    } else if (minDist === dRight) {
+      position = 'right';
+    } else {
+      position = 'left';
+    }
+
+    const { width, height } = getEdgeTabDimensions(position, size);
+    if (position === 'top' || position === 'bottom') {
+      const minX = wa.x + EDGE_TAB_EDGE_MARGIN_PX;
+      const maxX = Math.max(minX, wa.x + wa.width - width - EDGE_TAB_EDGE_MARGIN_PX);
+      const targetX = Math.max(minX, Math.min(maxX, cx - width / 2));
+      const t = maxX > minX ? (targetX - minX) / (maxX - minX) : 0.5;
+      offsetPercent = Math.round((5 + t * 90) * 10) / 10;
+    } else {
+      const minY = wa.y + EDGE_TAB_EDGE_MARGIN_PX;
+      const maxY = Math.max(minY, wa.y + wa.height - height - EDGE_TAB_EDGE_MARGIN_PX);
+      const targetY = Math.max(minY, Math.min(maxY, cy - height / 2));
+      const t = maxY > minY ? (targetY - minY) / (maxY - minY) : 0.5;
+      offsetPercent = Math.round((5 + t * 90) * 10) / 10;
+    }
+  }
+
+  const displayId = display.id === primary.id ? '' : String(display.id);
+  const bounds = getEdgeTabBounds({ position, offsetPercent, size, displayId });
+
+  return {
+    position,
+    offsetPercent,
+    displayId,
+    bounds,
+  };
+}
+
+function setEdgeTabIgnoreMouse(ignore) {
+  if (!edgeTabWindow || edgeTabWindow.isDestroyed()) return;
+  const next = Boolean(ignore);
+  if (lastEdgeTabIgnoreMouse === next) return;
+  lastEdgeTabIgnoreMouse = next;
+  try {
+    if (next) {
+      edgeTabWindow.setIgnoreMouseEvents(true, { forward: true });
+    } else {
+      edgeTabWindow.setIgnoreMouseEvents(false);
+    }
+  } catch (e) {}
+}
+
+function sendVisualStateToEdgeTab(override = null, force = false) {
+  if (!edgeTabWindow || edgeTabWindow.isDestroyed()) return;
+  if (!edgeTabWindow.webContents || edgeTabWindow.webContents.isLoading()) return;
+
+  const position = (override && override.position) || storage.getEdgeTabPosition();
+  const size = (override && override.size) || storage.getEdgeTabSize();
+  const locked =
+    override && typeof override.locked === 'boolean'
+      ? override.locked
+      : storage.getEdgeTabLocked();
+  const theme = storage.getTheme();
+
+  const key = `${position}|${size}|${locked ? '1' : '0'}|${theme}`;
+  if (!force && key === lastSentEdgeTabVisualKey) return;
+  lastSentEdgeTabVisualKey = key;
+
+  edgeTabWindow.webContents.send('satztresor-msg', {
+    type: 'edgeTabState',
+    position,
+    side: position === 'right' ? 'right' : 'left',
+    size,
+    locked,
+    theme,
+  });
 }
 
 function createEdgeTabWindow() {
@@ -285,7 +697,10 @@ function createEdgeTabWindow() {
     y: b.y,
     width: b.width,
     height: b.height,
+    minWidth: 1,
+    minHeight: 1,
     frame: false,
+    thickFrame: false,
     transparent: true,
     alwaysOnTop: true,
     skipTaskbar: true,
@@ -306,6 +721,7 @@ function createEdgeTabWindow() {
   edgeTabWindow.loadFile(path.join(__dirname, '..', 'ui', 'edge-tab.html'));
 
   edgeTabWindow.webContents.on('did-finish-load', () => {
+    lastSentEdgeTabVisualKey = '';
     syncEdgeTabWindow();
   });
 
@@ -320,29 +736,40 @@ function createEdgeTabWindow() {
 function syncEdgeTabWindow() {
   if (!edgeTabWindow || edgeTabWindow.isDestroyed()) return;
 
-  const side = getEdgeTabSide();
-  const theme = storage.getTheme();
-
-  if (edgeTabWindow.webContents && !edgeTabWindow.webContents.isLoading()) {
-    edgeTabWindow.webContents.send('satztresor-msg', {
-      type: 'edgeTabState',
-      side,
-      theme,
-    });
-  }
+  const activeOverride = isDraggingEdgeTab ? liveDragEdgeTabState : null;
+  sendVisualStateToEdgeTab(activeOverride, false);
 
   const shouldShow =
     !isQuitting &&
     storage.getEdgeTabEnabled() &&
-    (!mainWindow || mainWindow.isDestroyed() || !mainWindow.isVisible());
+    !isWindowEffectivelyVisible();
 
   if (shouldShow) {
-    const b = getEdgeTabBounds();
-    edgeTabWindow.setBounds({ x: b.x, y: b.y, width: b.width, height: b.height });
+    const b = getEdgeTabBounds(activeOverride);
+    setWindowBoundsSafe(edgeTabWindow, {
+      x: b.x,
+      y: b.y,
+      width: b.width,
+      height: b.height,
+    });
+    if (isDraggingEdgeTab || !isCornerEdgeTabPosition(b.position)) {
+      setEdgeTabIgnoreMouse(false);
+    } else if (lastEdgeTabIgnoreMouse === null) {
+      setEdgeTabIgnoreMouse(true);
+    }
     if (!edgeTabWindow.isVisible()) {
       edgeTabWindow.showInactive();
+      win32.suppressOverlayWindowFrame(getEdgeTabHwnd());
     }
+    // Re-apply bounds after showInactive so initial non-resizable creation honors sub-136px widths on Windows
+    setWindowBoundsSafe(edgeTabWindow, {
+      x: b.x,
+      y: b.y,
+      width: b.width,
+      height: b.height,
+    });
   } else if (edgeTabWindow.isVisible()) {
+    lastEdgeTabIgnoreMouse = null;
     edgeTabWindow.hide();
   }
 }
@@ -351,38 +778,39 @@ function syncEdgeTabWindow() {
 // Main SatzTresor Palette Window
 // ============================================================================
 function createSatzTresorWindow() {
+  const ctx = getActiveDisplayContext('startup');
   const layoutMode = storage.getLayoutMode();
-  const initialBounds = getBoundsForLayout(layoutMode);
+  const isPinned = storage.isPinned();
+  const initialBounds = getTargetWindowBounds(layoutMode, isPinned, ctx);
 
   mainWindow = new BrowserWindow({
     x: initialBounds.x,
     y: initialBounds.y,
     width: initialBounds.width,
     height: initialBounds.height,
+    minWidth: 1,
+    minHeight: 1,
     frame: false,
+    thickFrame: false,
     transparent: true,
     alwaysOnTop: true,
     skipTaskbar: true,
     show: false,
     resizable: false,
-    hasShadow: true,
+    hasShadow: false,
+    enableLargerThanScreen: true,
     icon: appIcon,
     backgroundColor: '#00000000',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      backgroundThrottling: false,
     },
   });
 
+  mainWindow.setAlwaysOnTop(true, isPinned ? 'floating' : 'screen-saver');
   mainWindow.loadFile(path.join(__dirname, '..', 'ui', 'index.html'));
-
-  mainWindow.webContents.on('did-finish-load', () => {
-    sendDataToRenderer();
-    if (storage.isLocked) {
-      mainWindow.webContents.send('satztresor-msg', { type: 'openUnlock' });
-    }
-  });
 
   mainWindow.on('blur', () => {
     if (isRecordingHotkey) {
@@ -392,13 +820,12 @@ function createSatzTresorWindow() {
     if (
       !isQuitting &&
       !isSystemDialogOpen &&
+      !isClosingAnimation &&
       mainWindow &&
       mainWindow.isVisible() &&
-      !storage.isLocked &&
       !storage.isPinned()
     ) {
-      pendingPromptClipboard = null;
-      mainWindow.hide();
+      hideWindowSmoothly({ restoreFocus: false });
     }
   });
 
@@ -414,41 +841,21 @@ function createSatzTresorWindow() {
   mainWindow.on('close', (e) => {
     if (!isQuitting) {
       e.preventDefault();
-      mainWindow.hide();
+      hideWindowSmoothly({ restoreFocus: false, immediate: true });
     }
   });
 }
 
-function updatePinAndDock(isPinned) {
-  const layoutMode = storage.getLayoutMode();
-  const sidebarWidth = storage.getSidebarWidth();
-  const targetHwnd = win32.getLastForegroundWindow();
-  const ctx = getActiveDisplayContext();
-
-  if (isPinned && (layoutMode === 'sidebar_left' || layoutMode === 'sidebar_right')) {
-    const physicalWidth = Math.round(sidebarWidth * ctx.scaleFactor);
-    win32.alignWindowsToDock(layoutMode, physicalWidth, targetHwnd, {
-      isPrimary: ctx.isPrimary,
-      workArea: ctx.physicalWorkArea,
-    });
-  } else {
-    win32.restoreWindowsFromDock();
-  }
+function updatePinAndDock() {
+  win32.restoreWindowsFromDock();
 }
 
-function applyLayout(mode) {
-  storage.setLayoutMode(mode);
+function applyLayout() {
+  storage.setLayoutMode('center');
   if (!mainWindow) return;
 
-  const bounds = getBoundsForLayout(mode);
-  mainWindow.setBounds(bounds);
-
-  if (storage.isPinned()) {
-    updatePinAndDock(true);
-  } else {
-    win32.restoreWindowsFromDock();
-  }
-
+  win32.restoreWindowsFromDock();
+  syncWindowGeometry();
   syncEdgeTabWindow();
   sendDataToRenderer();
   updateTrayMenu();
@@ -501,7 +908,7 @@ function restartKeyboardHook() {
   if (useDoubleTap || useHotstrings) {
     win32.startKeyboardHook({
       doubleTapCtrlEnabled: () => storage.getDoubleTapCtrlEnabled() && !isRecordingHotkey,
-      onDoubleTapCtrl: () => toggleWindow(),
+      onDoubleTapCtrl: () => toggleWindow(false, 'keyboard'),
       hotstringsEnabled: () => storage.getHotstringsEnabled() && !storage.isLocked && !isRecordingHotkey,
       getTriggers: () => hotstringTriggers,
       onHotstringMatch: handleHotstringMatch,
@@ -526,15 +933,13 @@ function handleHotstringMatch(match, targetHwnd) {
     win32.setLastForegroundWindow(targetHwnd);
 
     setTimeout(() => {
-      if (!mainWindow) return;
-      const bounds = getBoundsForLayout(storage.getLayoutMode());
-      mainWindow.setBounds(bounds);
-      mainWindow.show();
-      mainWindow.focus();
-      sendDataToRenderer();
-      mainWindow.webContents.send('satztresor-msg', {
-        type: 'openPromptForSnippet',
-        snippet: match.snippet,
+      showWindow({
+        source: 'keyboard',
+        captureFg: false,
+        postShowMessage: {
+          type: 'openPromptForSnippet',
+          snippet: match.snippet,
+        },
       });
     }, 30);
     return;
@@ -544,70 +949,278 @@ function handleHotstringMatch(match, targetHwnd) {
     await executePaste(rawContent, savedClipboard);
     storage.incrementUsage(match.snippet.title);
     rebuildHotstringTriggers();
-    sendDataToRenderer();
+    markDataDirtyAndSync();
   }, 30);
 }
 
-function sendDataToRenderer() {
-  if (!mainWindow || mainWindow.isDestroyed() || !mainWindow.webContents) return;
+function sendDataToRenderer(options = {}) {
+  const { includeBackdropSnapshot = false } = options;
+  rendererDataDirty = true;
+  if (!mainWindow || mainWindow.isDestroyed() || !mainWindow.webContents || !isMainRendererReady) return;
 
   rebuildHotstringTriggers();
 
+  const ctx = getActiveDisplayContext();
   const payload = {
     type: 'updateData',
     version: APP_VERSION,
     layoutMode: storage.getLayoutMode(),
     sidebarWidth: storage.getSidebarWidth(),
+    centerCompact: storage.getCenterCompact(),
+    backdropMode: storage.getBackdropMode(),
+    backdropBlurPercent: storage.getBackdropBlurPercent(),
+    backdropDimPercent: storage.getBackdropDimPercent(),
+    dimBackground: storage.getDimBackground(),
     isPinned: storage.isPinned(),
     isEncrypted: storage.isEncrypted,
     isLocked: storage.isLocked,
     theme: storage.getTheme(),
     doubleTapCtrlEnabled: storage.getDoubleTapCtrlEnabled(),
     edgeTabEnabled: storage.getEdgeTabEnabled(),
+    edgeTabPosition: storage.getEdgeTabPosition(),
+    edgeTabOffsetPercent: storage.getEdgeTabOffsetPercent(),
+    edgeTabSize: storage.getEdgeTabSize(),
+    edgeTabLocked: storage.getEdgeTabLocked(),
+    edgeTabDisplayId: storage.getEdgeTabDisplayId(),
+    displays: getDisplaysSummary(),
     hotstringsEnabled: storage.getHotstringsEnabled(),
     hotstringPrefix: storage.getHotstringPrefix(),
     restoreClipboard: storage.getRestoreClipboard(),
     activeHotkeys: storage.getActiveHotkeys(),
     autostart: getAutostartEnabled(),
+    updateState: updater ? updater.getState() : null,
+    insets: ctx.workAreaInsets,
     snippets: storage.isLocked ? [] : storage.getSnippets(),
     categories: storage.isLocked ? [] : storage.getCategories(),
   };
 
+  if (includeBackdropSnapshot) {
+    payload.backdropSnapshot = !storage.isPinned() ? currentBackdropSnapshot : null;
+  }
+
+  rendererDataDirty = false;
   mainWindow.webContents.send('satztresor-msg', payload);
 }
 
-function showWindow() {
-  if (!mainWindow) return;
-
-  win32.captureForegroundWindow(getOwnWindowHwnds());
-  win32.resetHotstringBuffer();
-
-  const layoutMode = storage.getLayoutMode();
-  const bounds = getBoundsForLayout(layoutMode);
-  mainWindow.setBounds(bounds);
-
-  mainWindow.show();
-  mainWindow.focus();
-
-  if (storage.isPinned()) {
-    updatePinAndDock(true);
-  }
-
-  sendDataToRenderer();
-
-  if (storage.isLocked) {
-    mainWindow.webContents.send('satztresor-msg', { type: 'openUnlock' });
-  } else {
-    mainWindow.webContents.send('satztresor-msg', { type: 'focusSearch' });
+function markDataDirtyAndSync() {
+  rendererDataDirty = true;
+  if (isWindowEffectivelyVisible()) {
+    sendDataToRenderer();
   }
 }
 
-function toggleWindow(forceShow = false) {
-  if (!mainWindow) return;
-  if (mainWindow.isVisible() && !forceShow) {
+function finalizePendingShow(seq) {
+  if (!pendingShowContext || pendingShowContext.seq !== seq) return;
+  const { ctx, isPinned, postShowMessage } = pendingShowContext;
+  cancelPendingShow();
+  if (!mainWindow || mainWindow.isDestroyed() || isQuitting) return;
+
+  if (!mainWindow.isVisible()) {
+    mainWindow.show();
+    if (!isPinned && ctx) {
+      win32.applyFullscreenOverlayBounds(getMainWindowHwnd(), ctx.physicalBounds);
+      syncNativeBackdrop();
+    }
+  }
+  mainWindow.focus();
+
+  if (isPinned) {
+    updatePinAndDock(true);
+  }
+
+  mainWindow.webContents.send('satztresor-msg', {
+    type: 'startEntrance',
+    seq,
+    skipDefaultFocus: Boolean(postShowMessage),
+  });
+
+  if (postShowMessage && !storage.isLocked) {
+    mainWindow.webContents.send('satztresor-msg', postShowMessage);
+  } else if (storage.isLocked) {
+    mainWindow.webContents.send('satztresor-msg', { type: 'openUnlock' });
+  }
+
+  syncEdgeTabWindow();
+}
+
+function showWindow(options = {}) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+
+  const {
+    source = 'auto',
+    captureFg = true,
+    postShowMessage = null,
+  } = options;
+
+  const wasEffectivelyVisible = Boolean(
+    mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible() && !isClosingAnimation
+  );
+  const wasHidden = !mainWindow.isVisible();
+  cancelHideAnimation();
+
+  if (captureFg) {
+    win32.captureForegroundWindow(getOwnWindowHwnds());
+  }
+  win32.resetHotstringBuffer();
+
+  if (!isMainRendererReady) {
+    pendingShowRequest = { source, captureFg: false, postShowMessage };
+    return;
+  }
+
+  const isPinned = storage.isPinned();
+  const targetCtx = getActiveDisplayContext(source);
+
+  if (isPinned) {
+    currentBackdropSnapshot = null;
+  } else if (wasHidden) {
+    if (edgeTabWindow && !edgeTabWindow.isDestroyed() && edgeTabWindow.isVisible()) {
+      lastEdgeTabIgnoreMouse = null;
+      edgeTabWindow.hide();
+    }
+    currentBackdropSnapshot = win32.captureDisplayBackdrop(targetCtx.physicalBounds);
+  }
+
+  const ctx = syncWindowGeometry(source, targetCtx);
+  if (rendererDataDirty) {
+    sendDataToRenderer();
+  }
+
+  const seq = ++showSequenceCounter;
+  const waitAck = wasHidden && !isPinned;
+
+  mainWindow.webContents.send('satztresor-msg', {
+    type: 'prepareShow',
+    seq,
+    waitAck,
+    layoutMode: 'center',
+    isPinned,
+    backdropMode: storage.getBackdropMode(),
+    backdropBlurPercent: storage.getBackdropBlurPercent(),
+    backdropDimPercent: storage.getBackdropDimPercent(),
+    dimBackground: storage.getDimBackground(),
+    backdropSnapshot: !isPinned ? currentBackdropSnapshot : null,
+    centerCompact: storage.getCenterCompact(),
+    sidebarWidth: storage.getSidebarWidth(),
+    isLocked: storage.isLocked,
+    insets: ctx ? ctx.workAreaInsets : { top: 0, right: 0, bottom: 0, left: 0 },
+    wasHidden,
+    wasEffectivelyVisible,
+    skipDefaultFocus: Boolean(postShowMessage),
+  });
+
+  if (waitAck) {
+    isPendingShow = true;
+    pendingShowContext = { seq, ctx, isPinned, postShowMessage };
+    syncEdgeTabWindow();
+    pendingShowFallbackTimer = setTimeout(() => {
+      finalizePendingShow(seq);
+    }, SHOW_PREPARE_TIMEOUT_MS);
+    return;
+  }
+
+  if (!mainWindow.isVisible()) {
+    mainWindow.show();
+    if (!isPinned && ctx) {
+      win32.applyFullscreenOverlayBounds(getMainWindowHwnd(), ctx.physicalBounds);
+      syncNativeBackdrop();
+    }
+  }
+  mainWindow.focus();
+
+  if (isPinned) {
+    updatePinAndDock(true);
+  }
+
+  if (postShowMessage && !storage.isLocked) {
+    mainWindow.webContents.send('satztresor-msg', postShowMessage);
+  } else if (storage.isLocked) {
+    mainWindow.webContents.send('satztresor-msg', { type: 'openUnlock' });
+  }
+
+  syncEdgeTabWindow();
+}
+
+function hideWindowSmoothly({ restoreFocus = false, immediate = false } = {}) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+
+  pendingPromptClipboard = null;
+
+  if (!mainWindow.isVisible()) {
+    cancelHideAnimation();
+    currentBackdropSnapshot = null;
+    if (isMainRendererReady && mainWindow.webContents) {
+      mainWindow.webContents.send('satztresor-msg', { type: 'resetHiddenState' });
+    }
+    win32.restoreWindowsFromDock();
+    syncEdgeTabWindow();
+    return;
+  }
+
+  if (immediate || storage.isPinned() || !isMainRendererReady) {
+    cancelHideAnimation();
+    currentBackdropSnapshot = null;
     mainWindow.hide();
+    if (isMainRendererReady && mainWindow.webContents) {
+      mainWindow.webContents.send('satztresor-msg', { type: 'resetHiddenState' });
+    }
+    win32.restoreWindowsFromDock();
+    if (restoreFocus) {
+      const targetHwnd = win32.getLastForegroundWindow();
+      if (targetHwnd) win32.restoreForegroundWindow(targetHwnd);
+    }
+    syncEdgeTabWindow();
+    return;
+  }
+
+  if (isClosingAnimation) {
+    if (restoreFocus) {
+      const targetHwnd = win32.getLastForegroundWindow();
+      if (targetHwnd) win32.restoreForegroundWindow(targetHwnd);
+    }
+    return;
+  }
+
+  cancelPendingShow();
+  isClosingAnimation = true;
+  try {
+    mainWindow.setIgnoreMouseEvents(true);
+  } catch (e) {}
+
+  mainWindow.webContents.send('satztresor-msg', { type: 'animateOut' });
+  syncEdgeTabWindow();
+
+  if (restoreFocus) {
+    const targetHwnd = win32.getLastForegroundWindow();
+    if (targetHwnd) {
+      win32.restoreForegroundWindow(targetHwnd);
+    }
+  }
+
+  hideAnimationTimer = setTimeout(() => {
+    hideAnimationTimer = null;
+    isClosingAnimation = false;
+    currentBackdropSnapshot = null;
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      try {
+        mainWindow.hide();
+        mainWindow.setIgnoreMouseEvents(false);
+        if (isMainRendererReady && mainWindow.webContents) {
+          mainWindow.webContents.send('satztresor-msg', { type: 'resetHiddenState' });
+        }
+      } catch (e) {}
+    }
+    win32.restoreWindowsFromDock();
+    syncEdgeTabWindow();
+  }, CLOSE_ANIMATION_MS);
+}
+
+function toggleWindow(forceShow = false, source = 'auto') {
+  if (!mainWindow) return;
+  if (isWindowEffectivelyVisible() && !forceShow) {
+    hideWindowSmoothly({ restoreFocus: true });
   } else {
-    showWindow();
+    showWindow({ source });
   }
 }
 
@@ -801,8 +1414,149 @@ async function exportSnippetsWithFormat(format) {
   }
 }
 
+function buildEdgeTabSubmenuTemplate() {
+  const edgeTabOn = storage.getEdgeTabEnabled();
+  const edgeTabPos = storage.getEdgeTabPosition();
+  const edgeTabSize = storage.getEdgeTabSize();
+  const edgeTabLocked = storage.getEdgeTabLocked();
+  const displays = getDisplaysSummary();
+  const currentDisplayId = storage.getEdgeTabDisplayId();
+
+  const applyPos = (pos) => {
+    storage.setEdgeTabPosition(pos);
+    if (!storage.getEdgeTabEnabled()) {
+      storage.setEdgeTabEnabled(true);
+    }
+    syncEdgeTabWindow();
+    sendDataToRenderer();
+    updateTrayMenu();
+  };
+
+  const applySize = (sz) => {
+    storage.setEdgeTabSize(sz);
+    syncEdgeTabWindow();
+    sendDataToRenderer();
+    updateTrayMenu();
+  };
+
+  const items = [
+    {
+      label: 'Lasche anzeigen (Aktiviert)',
+      type: 'checkbox',
+      checked: edgeTabOn,
+      click: (item) => {
+        storage.setEdgeTabEnabled(item.checked);
+        syncEdgeTabWindow();
+        sendDataToRenderer();
+        updateTrayMenu();
+      },
+    },
+    {
+      label: 'Position fixieren (Verschieben sperren)',
+      type: 'checkbox',
+      checked: edgeTabLocked,
+      click: (item) => {
+        storage.setEdgeTabLocked(item.checked);
+        syncEdgeTabWindow();
+        sendDataToRenderer();
+        updateTrayMenu();
+      },
+    },
+    { type: 'separator' },
+    {
+      label: '◤ Ecke oben links (Dreieck)',
+      type: 'radio',
+      checked: edgeTabPos === 'top-left',
+      click: () => applyPos('top-left'),
+    },
+    {
+      label: '◥ Ecke oben rechts (Dreieck)',
+      type: 'radio',
+      checked: edgeTabPos === 'top-right',
+      click: () => applyPos('top-right'),
+    },
+    {
+      label: '◣ Ecke unten links (Dreieck)',
+      type: 'radio',
+      checked: edgeTabPos === 'bottom-left',
+      click: () => applyPos('bottom-left'),
+    },
+    {
+      label: '◢ Ecke unten rechts (Dreieck)',
+      type: 'radio',
+      checked: edgeTabPos === 'bottom-right',
+      click: () => applyPos('bottom-right'),
+    },
+    { type: 'separator' },
+    {
+      label: '◀ Linker Bildschirmrand',
+      type: 'radio',
+      checked: edgeTabPos === 'left',
+      click: () => applyPos('left'),
+    },
+    {
+      label: '▶ Rechter Bildschirmrand',
+      type: 'radio',
+      checked: edgeTabPos === 'right',
+      click: () => applyPos('right'),
+    },
+    {
+      label: '▲ Oberer Bildschirmrand',
+      type: 'radio',
+      checked: edgeTabPos === 'top',
+      click: () => applyPos('top'),
+    },
+    {
+      label: '▼ Unterer Bildschirmrand',
+      type: 'radio',
+      checked: edgeTabPos === 'bottom',
+      click: () => applyPos('bottom'),
+    },
+    { type: 'separator' },
+    {
+      label: 'Größe: Kompakt',
+      type: 'radio',
+      checked: edgeTabSize === 'compact',
+      click: () => applySize('compact'),
+    },
+    {
+      label: 'Größe: Standard',
+      type: 'radio',
+      checked: edgeTabSize === 'standard',
+      click: () => applySize('standard'),
+    },
+    {
+      label: 'Größe: Groß',
+      type: 'radio',
+      checked: edgeTabSize === 'large',
+      click: () => applySize('large'),
+    },
+  ];
+
+  if (displays.length > 1) {
+    items.push({ type: 'separator' });
+    for (const d of displays) {
+      const checked = d.isPrimary
+        ? !currentDisplayId || currentDisplayId === d.id
+        : currentDisplayId === d.id;
+      items.push({
+        label: `Bildschirm: ${d.label}`,
+        type: 'radio',
+        checked,
+        click: () => {
+          storage.setEdgeTabDisplayId(d.isPrimary ? '' : d.id);
+          syncEdgeTabWindow();
+          sendDataToRenderer();
+          updateTrayMenu();
+        },
+      });
+    }
+  }
+
+  return items;
+}
+
 function updateTrayMenu() {
-  const currentLayout = storage.getLayoutMode();
   const isAutostart = getAutostartEnabled();
   const doubleTapOn = storage.getDoubleTapCtrlEnabled();
   const edgeTabOn = storage.getEdgeTabEnabled();
@@ -817,7 +1571,7 @@ function updateTrayMenu() {
   const template = [
     {
       label: `${APP_NAME} öffnen${openHint}`,
-      click: () => toggleWindow(true),
+      click: () => toggleWindow(true, 'mouse'),
     },
     { type: 'separator' },
     {
@@ -832,15 +1586,8 @@ function updateTrayMenu() {
       },
     },
     {
-      label: 'Bildschirmrand-Lasche (Maus-Tab)',
-      type: 'checkbox',
-      checked: edgeTabOn,
-      click: (item) => {
-        storage.setEdgeTabEnabled(item.checked);
-        syncEdgeTabWindow();
-        sendDataToRenderer();
-        updateTrayMenu();
-      },
+      label: `Bildschirmrand-Lasche (${edgeTabOn ? 'Aktiv' : 'Aus'})`,
+      submenu: buildEdgeTabSubmenuTemplate(),
     },
     {
       label: 'Automatisches Ersetzen (Hotstrings)',
@@ -855,25 +1602,40 @@ function updateTrayMenu() {
     },
     { type: 'separator' },
     {
-      label: 'Erscheinungsbild',
+      label: 'Hintergrund-Effekt',
       submenu: [
         {
-          label: 'Seitlicher Tab (Links)',
+          label: 'Unscharf & abgedunkelt (Milchglas)',
           type: 'radio',
-          checked: currentLayout === 'sidebar_left',
-          click: () => applyLayout('sidebar_left'),
+          checked: storage.getBackdropMode() === 'blur',
+          click: () => {
+            storage.setBackdropMode('blur');
+            syncNativeBackdrop();
+            sendDataToRenderer();
+            updateTrayMenu();
+          },
         },
         {
-          label: 'Seitlicher Tab (Rechts)',
+          label: 'Vollständig ausblenden (Fokus)',
           type: 'radio',
-          checked: currentLayout === 'sidebar_right',
-          click: () => applyLayout('sidebar_right'),
+          checked: storage.getBackdropMode() === 'solid',
+          click: () => {
+            storage.setBackdropMode('solid');
+            syncNativeBackdrop();
+            sendDataToRenderer();
+            updateTrayMenu();
+          },
         },
         {
-          label: 'Zentriert (Spotlight)',
+          label: 'Transparent (Kein Effekt)',
           type: 'radio',
-          checked: currentLayout === 'center',
-          click: () => applyLayout('center'),
+          checked: storage.getBackdropMode() === 'off',
+          click: () => {
+            storage.setBackdropMode('off');
+            syncNativeBackdrop();
+            sendDataToRenderer();
+            updateTrayMenu();
+          },
         },
       ],
     },
@@ -886,6 +1648,7 @@ function updateTrayMenu() {
           checked: storage.getTheme() === 'dark',
           click: () => {
             storage.setTheme('dark');
+            syncNativeBackdrop();
             syncEdgeTabWindow();
             sendDataToRenderer();
             updateTrayMenu();
@@ -897,6 +1660,7 @@ function updateTrayMenu() {
           checked: storage.getTheme() === 'light',
           click: () => {
             storage.setTheme('light');
+            syncNativeBackdrop();
             syncEdgeTabWindow();
             sendDataToRenderer();
             updateTrayMenu();
@@ -907,15 +1671,19 @@ function updateTrayMenu() {
     {
       label: 'Neuen Baustein anlegen…',
       click: () => {
-        showWindow();
-        mainWindow.webContents.send('satztresor-msg', { type: 'openManager' });
+        showWindow({
+          source: 'mouse',
+          postShowMessage: { type: 'openManager' },
+        });
       },
     },
     {
       label: 'Einstellungen…',
       click: () => {
-        showWindow();
-        mainWindow.webContents.send('satztresor-msg', { type: 'openSettings' });
+        showWindow({
+          source: 'mouse',
+          postShowMessage: { type: 'openSettings' },
+        });
       },
     },
     { type: 'separator' },
@@ -959,8 +1727,10 @@ function updateTrayMenu() {
     {
       label: 'Verschlüsselung verwalten…',
       click: () => {
-        showWindow();
-        mainWindow.webContents.send('satztresor-msg', { type: 'manageEncryption' });
+        showWindow({
+          source: 'mouse',
+          postShowMessage: { type: 'manageEncryption' },
+        });
       },
     },
   ];
@@ -973,15 +1743,38 @@ function updateTrayMenu() {
         restartKeyboardHook();
         sendDataToRenderer();
         updateTrayMenu();
-        if (mainWindow && mainWindow.isVisible()) {
-          mainWindow.hide();
+        if (isWindowEffectivelyVisible()) {
+          hideWindowSmoothly({ restoreFocus: false });
         }
       },
     });
   }
 
+  const updState = updater ? updater.getState() : null;
+  const isUpdateReady =
+    updState && (updState.status === 'downloaded' || updState.status === 'portable-available');
+
   template.push(
     { type: 'separator' },
+    {
+      label: isUpdateReady
+        ? updState.status === 'portable-available'
+          ? `↓ Update v${updState.availableVersion} herunterladen…`
+          : `↻ Update v${updState.availableVersion} jetzt installieren`
+        : 'Nach Updates suchen…',
+      click: () => {
+        if (!updater) return;
+        if (isUpdateReady) {
+          updater.installNow();
+        } else {
+          showWindow({
+            source: 'mouse',
+            postShowMessage: { type: 'openSettings' },
+          });
+          updater.checkForUpdates({ manual: true });
+        }
+      },
+    },
     {
       label: 'Hilfe & Info',
       click: () => {
@@ -993,7 +1786,7 @@ function updateTrayMenu() {
               `${APP_NAME} v${APP_VERSION} — Moderner Satzbaustein-Manager\n\n` +
               '• Aufruf: 2× kurz Strg antippen, Bildschirmrand-Lasche anklicken oder eigenes Tastenkürzel\n' +
               '• Automatisches Ersetzen: Kürzel wie ;;mfg direkt in jedem Programm tippen\n' +
-              '• Erscheinungsbild: Seitlicher Tab (links/rechts) oder Zentriert (Spotlight)\n' +
+              '• Erscheinungsbild: Zentriertes Spotlight-Fenster mit weichem Milchglas-Hintergrund\n' +
               '• Schnelles Einfügen: [Alt] + [1..9] oder Eingabetaste\n' +
               '• 100% Sicher vor Windows Clipboard-Verlauf (Win+V) + Clipboard-Wiederherstellung\n' +
               '• Optionale AES-256-CBC PBKDF2 Verschlüsselung & automatische Backups',
@@ -1028,7 +1821,7 @@ function setupTray() {
   updateTrayMenu();
 
   tray.on('click', () => {
-    toggleWindow();
+    toggleWindow(false, 'mouse');
   });
 }
 
@@ -1036,7 +1829,7 @@ function registerHotkeys() {
   globalShortcut.unregisterAll();
   if (isRecordingHotkey) return;
 
-  const toggle = () => toggleWindow();
+  const toggle = () => toggleWindow(false, 'keyboard');
   const hotkeys = storage.getActiveHotkeys();
 
   for (const hk of hotkeys) {
@@ -1057,36 +1850,91 @@ ipcMain.on('satztresor-msg', (event, data) => {
   if (!data || !data.action) return;
 
   switch (data.action) {
-    case 'ready':
+    case 'ready': {
+      isMainRendererReady = true;
       sendDataToRenderer();
-      if (storage.isLocked) {
+      if (pendingShowRequest) {
+        const req = pendingShowRequest;
+        pendingShowRequest = null;
+        showWindow(req);
+      } else if (storage.isLocked) {
         mainWindow.webContents.send('satztresor-msg', { type: 'openUnlock' });
       }
       break;
+    }
 
-    // Edge-Tab Window actions
+    // Edge-Tab & Corner-Triangle Window actions
     case 'edgeTabReady':
+      lastSentEdgeTabVisualKey = '';
       syncEdgeTabWindow();
       break;
 
     case 'edgeTabClick':
-      showWindow();
+      showWindow({ source: 'mouse' });
       break;
 
+    case 'edgeTabSetIgnoreMouse': {
+      if (!isDraggingEdgeTab) {
+        const pos = storage.getEdgeTabPosition();
+        if (isCornerEdgeTabPosition(pos)) {
+          setEdgeTabIgnoreMouse(!!data.ignore);
+        } else {
+          setEdgeTabIgnoreMouse(false);
+        }
+      }
+      break;
+    }
+
     case 'edgeTabDrag': {
-      if (edgeTabWindow && !edgeTabWindow.isDestroyed() && typeof data.screenY === 'number') {
-        const b = getEdgeTabBounds(data.screenY);
-        edgeTabWindow.setBounds({ x: b.x, y: b.y, width: b.width, height: b.height });
+      if (storage.getEdgeTabLocked()) break;
+      if (edgeTabWindow && !edgeTabWindow.isDestroyed()) {
+        const snap = computeEdgeTabSnapFromCursor(data);
+        if (snap) {
+          isDraggingEdgeTab = true;
+          liveDragEdgeTabState = {
+            position: snap.position,
+            offsetPercent: snap.offsetPercent,
+            displayId: snap.displayId,
+            size: storage.getEdgeTabSize(),
+            locked: false,
+          };
+          setEdgeTabIgnoreMouse(false);
+          sendVisualStateToEdgeTab(liveDragEdgeTabState, false);
+          setWindowBoundsSafe(edgeTabWindow, {
+            x: snap.bounds.x,
+            y: snap.bounds.y,
+            width: snap.bounds.width,
+            height: snap.bounds.height,
+          });
+        }
       }
       break;
     }
 
     case 'edgeTabDragEnd': {
-      if (typeof data.screenY === 'number') {
-        const b = getEdgeTabBounds(data.screenY);
-        const usableH = Math.max(1, b.workArea.height - EDGE_TAB_HEIGHT);
-        const pct = ((b.y - b.workArea.y) / usableH) * 100;
-        storage.setEdgeTabYPercent(pct);
+      const wasDragging = isDraggingEdgeTab;
+      const snap = !storage.getEdgeTabLocked()
+        ? computeEdgeTabSnapFromCursor(data) || liveDragEdgeTabState
+        : null;
+      isDraggingEdgeTab = false;
+      liveDragEdgeTabState = null;
+
+      if (wasDragging && snap && snap.position) {
+        const clampedPct = Math.max(
+          5,
+          Math.min(95, Math.round((Number(snap.offsetPercent) || 42) * 10) / 10)
+        );
+        storage.setSettingsBatch({
+          EdgeTabPosition: snap.position,
+          EdgeTabOffsetPercent: String(clampedPct),
+          EdgeTabYPercent: String(Math.round(clampedPct)),
+          EdgeTabDisplayId: String(snap.displayId || ''),
+        });
+        syncEdgeTabWindow();
+        markDataDirtyAndSync();
+        updateTrayMenu();
+      } else {
+        syncEdgeTabWindow();
       }
       break;
     }
@@ -1098,10 +1946,15 @@ ipcMain.on('satztresor-msg', (event, data) => {
       break;
     }
 
-    case 'setLayoutMode': {
-      if (data.mode) {
-        applyLayout(data.mode);
+    case 'showPrepared': {
+      if (typeof data.seq === 'number') {
+        finalizePendingShow(data.seq);
       }
+      break;
+    }
+
+    case 'setLayoutMode': {
+      applyLayout('center');
       break;
     }
 
@@ -1140,11 +1993,7 @@ ipcMain.on('satztresor-msg', (event, data) => {
       const wasHotstringPrompt = pendingPromptClipboard !== null;
       pendingPromptClipboard = null;
       if (wasHotstringPrompt && !storage.isPinned()) {
-        mainWindow.hide();
-        const targetHwnd = win32.getLastForegroundWindow();
-        if (targetHwnd) {
-          setTimeout(() => win32.restoreForegroundWindow(targetHwnd), 25);
-        }
+        hideWindowSmoothly({ restoreFocus: true });
       }
       break;
     }
@@ -1156,7 +2005,7 @@ ipcMain.on('satztresor-msg', (event, data) => {
 
       const isPinned = storage.isPinned();
       if (!isPinned) {
-        mainWindow.hide();
+        hideWindowSmoothly({ restoreFocus: false });
       }
 
       setTimeout(() => {
@@ -1167,7 +2016,7 @@ ipcMain.on('satztresor-msg', (event, data) => {
           await executePaste(text, savedClip);
           if (title) {
             storage.incrementUsage(title);
-            sendDataToRenderer();
+            markDataDirtyAndSync();
           }
           if (isPinned && mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('satztresor-msg', {
@@ -1175,8 +2024,8 @@ ipcMain.on('satztresor-msg', (event, data) => {
               message: '✓ Eingefügt',
             });
           }
-        }, 45);
-      }, 30);
+        }, 40);
+      }, 18);
       break;
     }
 
@@ -1224,40 +2073,44 @@ ipcMain.on('satztresor-msg', (event, data) => {
     case 'togglePin': {
       const next = !storage.isPinned();
       storage.setPinned(next);
+      if (next) {
+        currentBackdropSnapshot = null;
+      } else {
+        const pinCtx = getActiveDisplayContext();
+        currentBackdropSnapshot = win32.captureDisplayBackdrop(pinCtx.physicalBounds);
+      }
+      sendDataToRenderer({ includeBackdropSnapshot: true });
+      syncWindowGeometry();
       updatePinAndDock(next);
-      sendDataToRenderer();
       mainWindow.webContents.send('satztresor-msg', {
         type: 'showToast',
-        message: next ? '📌 SatzTresor fixiert (Desktop ausgerichtet)' : '🔓 Fixierung gelöst (Normalansicht)',
+        message: next
+          ? '📌 SatzTresor dauerhaft im Vordergrund fixiert'
+          : '🔓 Fixierung gelöst (Spotlight-Overlay)',
       });
       break;
     }
 
+    case 'dismissOverlay':
     case 'collapseWindow':
     case 'hide':
     case 'close': {
-      pendingPromptClipboard = null;
-      if (mainWindow && mainWindow.isVisible()) {
-        mainWindow.hide();
-        win32.restoreWindowsFromDock();
-      }
+      hideWindowSmoothly({ restoreFocus: true });
       break;
     }
 
     case 'toggleCompactWidth': {
-      const current = storage.getSidebarWidth();
-      const next = current === 440 ? 320 : 440;
-      storage.setSidebarWidth(next);
-      const layoutMode = storage.getLayoutMode();
-      const bounds = getBoundsForLayout(layoutMode);
-      mainWindow.setBounds(bounds);
+      const nextCompact = !storage.getCenterCompact();
+      storage.setCenterCompact(nextCompact);
       if (storage.isPinned()) {
-        updatePinAndDock(true);
+        syncWindowGeometry();
       }
       sendDataToRenderer();
       mainWindow.webContents.send('satztresor-msg', {
         type: 'showToast',
-        message: next === 320 ? '⇤ Kompaktansicht (320px)' : '⇥ Standardansicht (440px)',
+        message: nextCompact
+          ? `⇤ Kompaktansicht (${CENTER_WIDTH_COMPACT}×${CENTER_HEIGHT_COMPACT})`
+          : `⇥ Standardansicht (${CENTER_WIDTH_STANDARD}×${CENTER_HEIGHT_STANDARD})`,
       });
       break;
     }
@@ -1283,10 +2136,59 @@ ipcMain.on('satztresor-msg', (event, data) => {
     case 'setTheme': {
       if (data.theme) {
         storage.setTheme(data.theme);
+        syncNativeBackdrop();
         syncEdgeTabWindow();
         sendDataToRenderer();
         updateTrayMenu();
       }
+      break;
+    }
+
+    case 'setBackdropMode': {
+      if (data.mode) {
+        storage.setBackdropMode(data.mode);
+        syncNativeBackdrop();
+        sendDataToRenderer();
+        updateTrayMenu();
+        const labels = {
+          blur: '✓ Hintergrund: Unscharf (Milchglas)',
+          solid: '✓ Hintergrund: Vollständig ausgeblendet',
+          off: 'Hintergrund-Effekt deaktiviert',
+        };
+        mainWindow.webContents.send('satztresor-msg', {
+          type: 'showToast',
+          message: labels[storage.getBackdropMode()] || '✓ Gespeichert',
+        });
+      }
+      break;
+    }
+
+    case 'setBackdropBlurPercent': {
+      if (typeof data.blurPercent !== 'undefined') {
+        storage.setBackdropBlurPercent(data.blurPercent);
+        markDataDirtyAndSync();
+      }
+      break;
+    }
+
+    case 'setBackdropDimPercent': {
+      if (typeof data.dimPercent !== 'undefined') {
+        storage.setBackdropDimPercent(data.dimPercent);
+        markDataDirtyAndSync();
+      }
+      break;
+    }
+
+    case 'setDimBackground': {
+      const enabled = !!data.enabled;
+      storage.setDimBackground(enabled);
+      syncNativeBackdrop();
+      sendDataToRenderer();
+      updateTrayMenu();
+      mainWindow.webContents.send('satztresor-msg', {
+        type: 'showToast',
+        message: enabled ? '✓ Hintergrund-Effekt aktiviert' : 'Hintergrund-Effekt deaktiviert',
+      });
       break;
     }
 
@@ -1322,6 +2224,74 @@ ipcMain.on('satztresor-msg', (event, data) => {
       mainWindow.webContents.send('satztresor-msg', {
         type: 'showToast',
         message: data.enabled ? '✓ Bildschirmrand-Lasche aktiviert' : 'Bildschirmrand-Lasche ausgeblendet',
+      });
+      break;
+    }
+
+    case 'setEdgeTabPosition': {
+      if (data.position) {
+        storage.setEdgeTabPosition(data.position);
+        syncEdgeTabWindow();
+        sendDataToRenderer();
+        updateTrayMenu();
+        const label = EDGE_TAB_POSITION_LABELS[storage.getEdgeTabPosition()] || 'Position aktualisiert';
+        mainWindow.webContents.send('satztresor-msg', {
+          type: 'showToast',
+          message: `✓ ${label}`,
+        });
+      }
+      break;
+    }
+
+    case 'setEdgeTabOffsetPercent': {
+      if (typeof data.offsetPercent !== 'undefined') {
+        storage.setEdgeTabOffsetPercent(data.offsetPercent);
+        syncEdgeTabWindow();
+        sendDataToRenderer();
+      }
+      break;
+    }
+
+    case 'setEdgeTabSize': {
+      if (data.size) {
+        storage.setEdgeTabSize(data.size);
+        syncEdgeTabWindow();
+        sendDataToRenderer();
+        updateTrayMenu();
+        const sizeLabels = {
+          compact: 'Kompakt',
+          standard: 'Standard',
+          large: 'Groß',
+        };
+        mainWindow.webContents.send('satztresor-msg', {
+          type: 'showToast',
+          message: `✓ Laschen-Größe: ${sizeLabels[storage.getEdgeTabSize()] || 'Standard'}`,
+        });
+      }
+      break;
+    }
+
+    case 'setEdgeTabLocked': {
+      const locked = !!data.locked;
+      storage.setEdgeTabLocked(locked);
+      syncEdgeTabWindow();
+      sendDataToRenderer();
+      updateTrayMenu();
+      mainWindow.webContents.send('satztresor-msg', {
+        type: 'showToast',
+        message: locked ? '🔒 Laschen-Position fixiert' : '🔓 Lasche wieder frei verschiebbar',
+      });
+      break;
+    }
+
+    case 'setEdgeTabDisplayId': {
+      storage.setEdgeTabDisplayId(data.displayId || '');
+      syncEdgeTabWindow();
+      sendDataToRenderer();
+      updateTrayMenu();
+      mainWindow.webContents.send('satztresor-msg', {
+        type: 'showToast',
+        message: '✓ Bildschirm für Lasche aktualisiert',
       });
       break;
     }
@@ -1491,42 +2461,166 @@ ipcMain.on('satztresor-msg', (event, data) => {
       }
       break;
     }
+
+    case 'checkForUpdates': {
+      if (updater) {
+        updater.checkForUpdates({ manual: true });
+      }
+      break;
+    }
+
+    case 'installUpdateNow': {
+      if (updater) {
+        updater.installNow();
+      }
+      break;
+    }
+
+    case 'setAutoUpdateEnabled': {
+      const enabled = !!data.enabled;
+      if (updater) {
+        updater.setAutoUpdateEnabled(enabled);
+      } else {
+        storage.setAutoUpdateEnabled(enabled);
+      }
+      updateTrayMenu();
+      mainWindow.webContents.send('satztresor-msg', {
+        type: 'showToast',
+        message: enabled
+          ? '✓ Automatische Updates aktiviert'
+          : 'Automatische Updates deaktiviert',
+      });
+      break;
+    }
+
+    case 'setUpdateRepo': {
+      const rawRepo = String(data.repo || '').trim();
+      const saved = updater ? updater.setUpdateRepo(rawRepo) : storage.setUpdateRepo(rawRepo);
+      updateTrayMenu();
+      if (rawRepo && !saved) {
+        mainWindow.webContents.send('satztresor-msg', {
+          type: 'showToast',
+          message: 'Bitte Format name/repository verwenden',
+        });
+      } else {
+        mainWindow.webContents.send('satztresor-msg', {
+          type: 'showToast',
+          message: saved ? `✓ Update-Quelle: ${saved}` : 'Update-Quelle zurückgesetzt',
+        });
+        if (saved && updater) {
+          updater.checkForUpdates({ manual: true });
+        }
+      }
+      break;
+    }
   }
 });
 
+function broadcastUpdateState(nextUpdateState) {
+  updateTrayMenu();
+  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents && isMainRendererReady) {
+    mainWindow.webContents.send('satztresor-msg', {
+      type: 'updateStatus',
+      updateState: nextUpdateState,
+    });
+  }
+}
+
+function prepareQuitForUpdate() {
+  isQuitting = true;
+  cancelHideAnimation();
+  storage.flushSave();
+  win32.restoreWindowsFromDock();
+  win32.stopKeyboardHook();
+  globalShortcut.unregisterAll();
+  if (tray) {
+    try {
+      tray.destroy();
+    } catch (e) {}
+    tray = null;
+  }
+  if (edgeTabWindow && !edgeTabWindow.isDestroyed()) {
+    try {
+      edgeTabWindow.destroy();
+    } catch (e) {}
+  }
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    try {
+      mainWindow.destroy();
+    } catch (e) {}
+  }
+}
+
 function applyThemeAndBoundsAfterUnlock() {
   if (!mainWindow) return;
-  const bounds = getBoundsForLayout(storage.getLayoutMode());
-  mainWindow.setBounds(bounds);
+  syncWindowGeometry();
   if (storage.isPinned()) {
     updatePinAndDock(true);
   }
 }
 
 app.whenReady().then(() => {
+  updater = new SatzTresorUpdater({
+    app,
+    shell,
+    storage,
+    currentVersion: APP_VERSION,
+    onStateChange: (nextState) => broadcastUpdateState(nextState),
+    onToast: (message) => {
+      if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents && isMainRendererReady) {
+        mainWindow.webContents.send('satztresor-msg', { type: 'showToast', message });
+      }
+    },
+    onBeforeQuitAndInstall: () => prepareQuitForUpdate(),
+  });
+
   createSatzTresorWindow();
   createEdgeTabWindow();
   setupTray();
   registerHotkeys();
   restartKeyboardHook();
+  updater.startSchedule();
 
-  screen.on('display-metrics-changed', () => {
+  const handleDisplayChange = () => {
     syncEdgeTabWindow();
-  });
+    updateTrayMenu();
+    markDataDirtyAndSync();
+    if (isWindowEffectivelyVisible()) {
+      syncWindowGeometry();
+    }
+  };
+
+  screen.on('display-metrics-changed', handleDisplayChange);
+  screen.on('display-added', handleDisplayChange);
+  screen.on('display-removed', handleDisplayChange);
 
   if (!launchedHidden) {
-    showWindow();
+    showWindow({ source: 'startup' });
   } else {
     syncEdgeTabWindow();
   }
 });
 
+app.on('before-quit', () => {
+  isQuitting = true;
+  cancelHideAnimation();
+});
+
 app.on('will-quit', () => {
   isQuitting = true;
+  if (updater) {
+    updater.stopSchedule();
+  }
   storage.flushSave();
   win32.restoreWindowsFromDock();
   win32.stopKeyboardHook();
   globalShortcut.unregisterAll();
+  if (tray) {
+    try {
+      tray.destroy();
+    } catch (e) {}
+    tray = null;
+  }
 });
 
 app.on('window-all-closed', (e) => {

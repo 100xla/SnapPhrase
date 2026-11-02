@@ -1,14 +1,20 @@
 /**
- * SatzTresor v1.3.0 — Renderer Application Logic
- * Raycast-style UI with token search, smart template prompts, hotstring configuration,
- * non-blocking confirmation modals, custom context menu, favorites, and encryption management.
+ * SatzTresor v1.5.3 — Renderer Application Logic
+ * Apple-inspired Spotlight UI with token search, smart template prompts, hotstring configuration,
+ * automatic background software updates, non-blocking confirmation modals, custom context menu,
+ * favorites, and encryption management.
  */
 
 (function () {
   const state = {
-    version: '1.3.0',
-    layoutMode: 'sidebar_left',
-    sidebarWidth: 440,
+    version: '1.5.3',
+    layoutMode: 'center',
+    centerCompact: false,
+    backdropMode: 'blur', // 'blur' | 'solid' | 'off'
+    backdropBlurPercent: 65,
+    backdropDimPercent: 60,
+    backdropSnapshot: null,
+    dimBackground: true,
     isPinned: false,
     isEncrypted: false,
     isLocked: false,
@@ -16,6 +22,12 @@
     autostart: false,
     doubleTapCtrlEnabled: true,
     edgeTabEnabled: true,
+    edgeTabPosition: 'left',
+    edgeTabOffsetPercent: 42,
+    edgeTabSize: 'standard',
+    edgeTabLocked: false,
+    edgeTabDisplayId: '',
+    displays: [],
     hotstringsEnabled: true,
     hotstringPrefix: ';;',
     restoreClipboard: true,
@@ -29,15 +41,23 @@
     contextMenuSnippet: null,
     currentPromptSnippet: null,
     cryptoMode: 'encrypt', // 'encrypt' | 'change' | 'remove'
+    managerInitialSnapshot: null,
+    updateState: null,
   };
 
   // DOM Elements
+  const screenBackdrop = document.getElementById('screenBackdrop');
+  const screenBackdropImg = document.getElementById('screenBackdropImg');
+  const screenStage = document.getElementById('screenStage');
+  const appShell = document.getElementById('appShell');
   const searchInput = document.getElementById('searchInput');
   const snippetList = document.getElementById('snippetList');
   const categoriesBar = document.getElementById('categoriesBar');
   const matchCountBadge = document.getElementById('matchCountBadge');
   const toastMsg = document.getElementById('toastMsg');
   const versionTag = document.getElementById('versionTag');
+  const updateReadyPill = document.getElementById('updateReadyPill');
+  const updateReadyLabel = document.getElementById('updateReadyLabel');
   const hotstringStatusPill = document.getElementById('hotstringStatusPill');
 
   // Top buttons
@@ -47,7 +67,6 @@
   const btnNewSnippetQuick = document.getElementById('btnNewSnippetQuick');
   const btnOpenSettings = document.getElementById('btnOpenSettings');
   const btnCollapseWindow = document.getElementById('btnCollapseWindow');
-  const layoutButtons = document.querySelectorAll('.btn-layout');
 
   // Variable Prompt Modal
   const promptModal = document.getElementById('promptModal');
@@ -75,6 +94,13 @@
   const settingsModal = document.getElementById('settingsModal');
   const settingAutostart = document.getElementById('settingAutostart');
   const settingTheme = document.getElementById('settingTheme');
+  const settingBackdropMode = document.getElementById('settingBackdropMode');
+  const backdropBlurConfigPanel = document.getElementById('backdropBlurConfigPanel');
+  const settingBackdropBlurPercent = document.getElementById('settingBackdropBlurPercent');
+  const backdropBlurPercentValue = document.getElementById('backdropBlurPercentValue');
+  const settingBackdropDimPercent = document.getElementById('settingBackdropDimPercent');
+  const backdropDimPercentValue = document.getElementById('backdropDimPercentValue');
+  const settingDimBackground = document.getElementById('settingDimBackground');
   const settingRestoreClipboard = document.getElementById('settingRestoreClipboard');
   const settingHotstringsEnabled = document.getElementById('settingHotstringsEnabled');
   const settingHotstringPrefix = document.getElementById('settingHotstringPrefix');
@@ -82,6 +108,20 @@
   const hotstringDescPreview = document.getElementById('hotstringDescPreview');
   const settingDoubleTapCtrl = document.getElementById('settingDoubleTapCtrl');
   const settingEdgeTab = document.getElementById('settingEdgeTab');
+  const edgeTabConfigPanel = document.getElementById('edgeTabConfigPanel');
+  const edgeTabMiniMonitor = document.getElementById('edgeTabMiniMonitor');
+  const edgeMiniCaption = document.getElementById('edgeMiniCaption');
+  const edgeSpotButtons = document.querySelectorAll('.edge-spot');
+  const settingEdgeTabPosition = document.getElementById('settingEdgeTabPosition');
+  const edgeTabOffsetWrap = document.getElementById('edgeTabOffsetWrap');
+  const edgeTabOffsetAxisLabel = document.getElementById('edgeTabOffsetAxisLabel');
+  const edgeTabOffsetValue = document.getElementById('edgeTabOffsetValue');
+  const settingEdgeTabOffset = document.getElementById('settingEdgeTabOffset');
+  const edgeTabCornerHint = document.getElementById('edgeTabCornerHint');
+  const settingEdgeTabSize = document.getElementById('settingEdgeTabSize');
+  const settingEdgeTabLocked = document.getElementById('settingEdgeTabLocked');
+  const edgeTabDisplayWrap = document.getElementById('edgeTabDisplayWrap');
+  const settingEdgeTabDisplay = document.getElementById('settingEdgeTabDisplay');
   const activeHotkeysList = document.getElementById('activeHotkeysList');
   const btnRecordHotkey = document.getElementById('btnRecordHotkey');
   const btnImportData = document.getElementById('btnImportData');
@@ -90,6 +130,14 @@
   const btnExportCsv = document.getElementById('btnExportCsv');
   const btnOpenCryptoFromSettings = document.getElementById('btnOpenCryptoFromSettings');
   const btnLockFromSettings = document.getElementById('btnLockFromSettings');
+  const updateStatusHeadline = document.getElementById('updateStatusHeadline');
+  const updateStatusDesc = document.getElementById('updateStatusDesc');
+  const updateProgressWrap = document.getElementById('updateProgressWrap');
+  const updateProgressBar = document.getElementById('updateProgressBar');
+  const btnUpdateAction = document.getElementById('btnUpdateAction');
+  const settingAutoUpdate = document.getElementById('settingAutoUpdate');
+  const settingUpdateRepo = document.getElementById('settingUpdateRepo');
+  const btnSaveUpdateRepo = document.getElementById('btnSaveUpdateRepo');
   const btnCloseSettings = document.getElementById('btnCloseSettings');
 
   // Unlock Modal
@@ -210,18 +258,37 @@
           state.version = data.version;
           versionTag.textContent = 'v' + data.version;
         }
-        if (data.layoutMode) {
-          state.layoutMode = data.layoutMode;
-          updateLayoutUI();
-        }
+        state.layoutMode = 'center';
         if (typeof data.isPinned !== 'undefined') {
           state.isPinned = !!data.isPinned;
-          updatePinUI();
         }
-        if (typeof data.sidebarWidth !== 'undefined') {
-          state.sidebarWidth = data.sidebarWidth;
-          updatePinUI();
+        if (typeof data.centerCompact !== 'undefined') {
+          state.centerCompact = !!data.centerCompact;
         }
+        if (typeof data.backdropMode === 'string') {
+          state.backdropMode = data.backdropMode;
+          state.dimBackground = data.backdropMode !== 'off';
+          if (settingBackdropMode) settingBackdropMode.value = state.backdropMode;
+        } else if (typeof data.dimBackground !== 'undefined') {
+          state.dimBackground = !!data.dimBackground;
+          state.backdropMode = state.dimBackground ? 'blur' : 'off';
+          if (settingBackdropMode) settingBackdropMode.value = state.backdropMode;
+        }
+        if (settingDimBackground) settingDimBackground.checked = state.dimBackground;
+        if (typeof data.backdropBlurPercent === 'number') {
+          state.backdropBlurPercent = data.backdropBlurPercent;
+        }
+        if (typeof data.backdropDimPercent === 'number') {
+          state.backdropDimPercent = data.backdropDimPercent;
+        }
+        if (typeof data.backdropSnapshot !== 'undefined') {
+          applyBackdropSnapshot(data.backdropSnapshot);
+        }
+        if (data.insets) {
+          applyWorkAreaInsets(data.insets);
+        }
+        updateLayoutUI();
+        updatePinUI();
         if (typeof data.isEncrypted !== 'undefined') {
           state.isEncrypted = !!data.isEncrypted;
         }
@@ -257,6 +324,24 @@
           state.edgeTabEnabled = !!data.edgeTabEnabled;
           if (settingEdgeTab) settingEdgeTab.checked = state.edgeTabEnabled;
         }
+        if (typeof data.edgeTabPosition === 'string') {
+          state.edgeTabPosition = data.edgeTabPosition;
+        }
+        if (typeof data.edgeTabOffsetPercent === 'number') {
+          state.edgeTabOffsetPercent = data.edgeTabOffsetPercent;
+        }
+        if (typeof data.edgeTabSize === 'string') {
+          state.edgeTabSize = data.edgeTabSize;
+        }
+        if (typeof data.edgeTabLocked !== 'undefined') {
+          state.edgeTabLocked = !!data.edgeTabLocked;
+        }
+        if (typeof data.edgeTabDisplayId === 'string') {
+          state.edgeTabDisplayId = data.edgeTabDisplayId;
+        }
+        if (Array.isArray(data.displays)) {
+          state.displays = data.displays;
+        }
         if (Array.isArray(data.activeHotkeys)) {
           state.activeHotkeys = data.activeHotkeys;
         }
@@ -267,10 +352,125 @@
           state.categories = data.categories;
           renderCategories();
         }
+        if (data.updateState) {
+          state.updateState = data.updateState;
+          renderUpdateUI();
+        }
         updateSecurityButtonsUI();
         updateHotstringUI();
+        renderEdgeTabSettingsUI();
         renderActiveHotkeys();
         filterAndRender();
+        break;
+
+      case 'updateStatus':
+        if (data.updateState) {
+          state.updateState = data.updateState;
+          renderUpdateUI();
+        }
+        break;
+
+      case 'updateInsets':
+        if (typeof data.backdropBlurPercent === 'number') {
+          state.backdropBlurPercent = data.backdropBlurPercent;
+        }
+        if (typeof data.backdropDimPercent === 'number') {
+          state.backdropDimPercent = data.backdropDimPercent;
+        }
+        if (typeof data.backdropSnapshot !== 'undefined') {
+          applyBackdropSnapshot(data.backdropSnapshot);
+        }
+        if (data.insets) {
+          applyWorkAreaInsets(data.insets);
+        }
+        break;
+
+      case 'prepareShow': {
+        state.layoutMode = 'center';
+        if (typeof data.isPinned !== 'undefined') state.isPinned = !!data.isPinned;
+        if (typeof data.backdropMode === 'string') {
+          state.backdropMode = data.backdropMode;
+          state.dimBackground = data.backdropMode !== 'off';
+          if (settingBackdropMode) settingBackdropMode.value = state.backdropMode;
+        } else if (typeof data.dimBackground !== 'undefined') {
+          state.dimBackground = !!data.dimBackground;
+          state.backdropMode = state.dimBackground ? 'blur' : 'off';
+          if (settingBackdropMode) settingBackdropMode.value = state.backdropMode;
+        }
+        if (settingDimBackground) settingDimBackground.checked = state.dimBackground;
+        if (typeof data.backdropBlurPercent === 'number') {
+          state.backdropBlurPercent = data.backdropBlurPercent;
+        }
+        if (typeof data.backdropDimPercent === 'number') {
+          state.backdropDimPercent = data.backdropDimPercent;
+        }
+        if (typeof data.backdropSnapshot !== 'undefined') {
+          applyBackdropSnapshot(data.backdropSnapshot);
+        }
+        if (typeof data.centerCompact !== 'undefined') state.centerCompact = !!data.centerCompact;
+        if (typeof data.isLocked !== 'undefined') state.isLocked = !!data.isLocked;
+        if (data.insets) applyWorkAreaInsets(data.insets);
+
+        updateLayoutUI();
+        updatePinUI();
+
+        if (!state.isLocked && !data.skipDefaultFocus && !state.isPinned && !data.wasEffectivelyVisible) {
+          closeAllModals();
+          closeContextMenu();
+          if (searchInput.value !== '') {
+            searchInput.value = '';
+          }
+          state.selectedIndex = 0;
+          filterAndRender();
+        }
+
+        if (data.waitAck) {
+          document.body.classList.add('no-anim');
+          document.body.classList.remove('window-visible', 'window-closing');
+          if (appShell) {
+            void appShell.offsetWidth;
+          }
+          const notifyReady = () => sendIPC('showPrepared', { seq: data.seq });
+          if (
+            state.backdropSnapshot &&
+            state.backdropMode === 'blur' &&
+            screenBackdropImg &&
+            typeof screenBackdropImg.decode === 'function'
+          ) {
+            screenBackdropImg.decode().then(notifyReady, notifyReady);
+          } else {
+            notifyReady();
+          }
+        } else {
+          triggerEntranceAnimation({
+            shouldFocusDefault: !data.skipDefaultFocus,
+            wasHidden: data.wasHidden !== false,
+            wasEffectivelyVisible: !!data.wasEffectivelyVisible,
+          });
+        }
+        break;
+      }
+
+      case 'startEntrance':
+        requestAnimationFrame(() => {
+          void document.body.offsetWidth;
+          document.body.classList.remove('no-anim', 'window-closing');
+          document.body.classList.add('window-visible');
+          focusDefaultControl(!data.skipDefaultFocus);
+        });
+        break;
+
+      case 'resetHiddenState':
+        document.body.classList.add('no-anim');
+        document.body.classList.remove('window-visible', 'window-closing');
+        applyBackdropSnapshot(null);
+        syncBodyClasses();
+        break;
+
+      case 'animateOut':
+        document.body.classList.remove('no-anim');
+        document.body.classList.add('window-closing');
+        closeContextMenu();
         break;
 
       case 'openUnlock':
@@ -567,36 +767,137 @@
     if (settingTheme) settingTheme.value = theme;
   }
 
-  function updateLayoutUI() {
-    document.body.className = 'mode-' + state.layoutMode;
-    layoutButtons.forEach((btn) => {
-      btn.classList.toggle('active', btn.dataset.layout === state.layoutMode);
-    });
+  function applyWorkAreaInsets(insets) {
+    if (!insets) return;
+    const rootStyle = document.documentElement.style;
+    rootStyle.setProperty('--wa-top', `${Math.max(0, Number(insets.top) || 0)}px`);
+    rootStyle.setProperty('--wa-right', `${Math.max(0, Number(insets.right) || 0)}px`);
+    rootStyle.setProperty('--wa-bottom', `${Math.max(0, Number(insets.bottom) || 0)}px`);
+    rootStyle.setProperty('--wa-left', `${Math.max(0, Number(insets.left) || 0)}px`);
   }
 
-  layoutButtons.forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const mode = btn.dataset.layout;
-      state.layoutMode = mode;
-      updateLayoutUI();
-      sendIPC('setLayoutMode', { mode });
-    });
-  });
+  function applyBackdropSnapshot(snapshotUrl) {
+    state.backdropSnapshot = snapshotUrl || null;
+    if (screenBackdropImg) {
+      if (state.backdropSnapshot) {
+        if (screenBackdropImg.getAttribute('src') !== state.backdropSnapshot) {
+          screenBackdropImg.setAttribute('src', state.backdropSnapshot);
+        }
+      } else {
+        screenBackdropImg.removeAttribute('src');
+      }
+    }
+  }
+
+  function renderBackdropTuneUI() {
+    const rawBlur = Number(state.backdropBlurPercent);
+    const blurPct = Math.max(0, Math.min(100, Math.round(Number.isNaN(rawBlur) ? 65 : rawBlur)));
+    const blurPx = blurPct <= 0 ? 0 : Math.round((blurPct / 100) * 36 * 10) / 10;
+    const rawDim = Number(state.backdropDimPercent);
+    const dimPct = Math.max(0, Math.min(90, Math.round(Number.isNaN(rawDim) ? 60 : rawDim)));
+    const dimAlpha = dimPct / 100;
+    const dimEdgeAlpha = Math.min(0.94, dimAlpha * 1.14);
+    const rootStyle = document.documentElement.style;
+    rootStyle.setProperty('--backdrop-blur-px', `${blurPx}px`);
+    rootStyle.setProperty('--backdrop-scale', (1 + blurPx * 0.0045).toFixed(4));
+    rootStyle.setProperty('--backdrop-dim-alpha', dimAlpha.toFixed(3));
+    rootStyle.setProperty('--backdrop-dim-edge-alpha', dimEdgeAlpha.toFixed(3));
+
+    if (backdropBlurConfigPanel) {
+      const showTune = (state.backdropMode || 'blur') === 'blur';
+      backdropBlurConfigPanel.classList.toggle('hidden', !showTune);
+    }
+    if (settingBackdropBlurPercent && document.activeElement !== settingBackdropBlurPercent) {
+      settingBackdropBlurPercent.value = String(blurPct);
+    }
+    if (backdropBlurPercentValue) {
+      backdropBlurPercentValue.textContent = `${blurPct} %`;
+    }
+    if (settingBackdropDimPercent && document.activeElement !== settingBackdropDimPercent) {
+      settingBackdropDimPercent.value = String(dimPct);
+    }
+    if (backdropDimPercentValue) {
+      backdropDimPercentValue.textContent = `${dimPct} %`;
+    }
+  }
+
+  function syncBodyClasses() {
+    const cl = document.body.classList;
+    cl.add('mode-center');
+    cl.remove('backdrop-blur', 'backdrop-solid', 'backdrop-off');
+    const bMode = state.backdropMode || (state.dimBackground ? 'blur' : 'off');
+    cl.add('backdrop-' + bMode);
+    cl.toggle('has-backdrop-snapshot', Boolean(state.backdropSnapshot));
+    cl.toggle('is-pinned', !!state.isPinned);
+    cl.toggle('no-dim', bMode === 'off');
+    cl.toggle('center-compact', !!state.centerCompact);
+    renderBackdropTuneUI();
+  }
+
+  function updateWidthToggleButtonUI() {
+    if (!btnToggleWidth) return;
+    const isCompact = !!state.centerCompact;
+    btnToggleWidth.classList.toggle('active', isCompact);
+    btnToggleWidth.title = isCompact
+      ? 'Standardgröße (780×560) wiederherstellen'
+      : 'Kompaktgröße (640×460) aktivieren';
+  }
+
+  function updateLayoutUI() {
+    syncBodyClasses();
+    updateWidthToggleButtonUI();
+  }
 
   function updatePinUI() {
+    syncBodyClasses();
     if (btnPinWindow) {
       btnPinWindow.classList.toggle('active', !!state.isPinned);
       btnPinWindow.title = state.isPinned
-        ? '📌 SatzTresor ist fixiert (Desktop angepasst — Klicken zum Lösen)'
-        : 'SatzTresor fixieren (Desktop passt sich an / Fenster bleibt dauerhaft offen)';
+        ? '📌 SatzTresor ist im Vordergrund fixiert (Klicken zum Lösen in den Spotlight-Modus)'
+        : 'SatzTresor dauerhaft im Vordergrund fixieren (ohne Hintergrund-Abdunklung)';
     }
-    if (btnToggleWidth) {
-      const isCompact = state.sidebarWidth === 320;
-      btnToggleWidth.classList.toggle('active', isCompact);
-      btnToggleWidth.title = isCompact
-        ? 'Standardbreite (440px) wiederherstellen'
-        : 'Tab verkleinern (Kompakt: 320px)';
+    updateWidthToggleButtonUI();
+  }
+
+  function focusDefaultControl(shouldFocusDefault) {
+    if (!shouldFocusDefault) return;
+    if (state.isLocked || unlockModal.classList.contains('active')) {
+      unlockPassword.focus();
+    } else if (
+      !promptModal.classList.contains('active') &&
+      !managerModal.classList.contains('active') &&
+      !settingsModal.classList.contains('active') &&
+      !cryptoModal.classList.contains('active') &&
+      !confirmModal.classList.contains('active')
+    ) {
+      searchInput.focus();
     }
+  }
+
+  function triggerEntranceAnimation({
+    shouldFocusDefault = true,
+    wasHidden = true,
+    wasEffectivelyVisible = false,
+  } = {}) {
+    if (state.isPinned || wasEffectivelyVisible || !wasHidden) {
+      // Either pinned, already open, or interrupted mid-close: smoothly transition without snapping to 0
+      document.body.classList.remove('no-anim', 'window-closing');
+      document.body.classList.add('window-visible');
+      focusDefaultControl(shouldFocusDefault);
+      return;
+    }
+
+    document.body.classList.add('no-anim');
+    document.body.classList.remove('window-visible', 'window-closing');
+    if (appShell) {
+      void appShell.offsetWidth;
+    }
+
+    requestAnimationFrame(() => {
+      document.body.classList.remove('no-anim');
+      document.body.classList.add('window-visible');
+      focusDefaultControl(shouldFocusDefault);
+    });
   }
 
   if (btnLockNow) {
@@ -655,9 +956,22 @@
     return `${String(d).padStart(2, '0')}.${String(m + 1).padStart(2, '0')}.${y}`;
   }
 
-  // Categories rendering
+  // Categories rendering (avoids unnecessary DOM rebuilds when category list is unchanged)
+  let renderedCategoriesKey = '';
+  if (categoriesBar) {
+    categoriesBar.addEventListener(
+      'wheel',
+      (e) => {
+        if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+          e.preventDefault();
+          categoriesBar.scrollLeft += e.deltaY;
+        }
+      },
+      { passive: false }
+    );
+  }
+
   function renderCategories() {
-    categoriesBar.innerHTML = '';
     const baseIcons = {
       '[ Alle ]': '🌐 Alle',
       '[ ⭐ Favoriten ]': '⭐ Favoriten',
@@ -668,6 +982,16 @@
       state.activeCategory = '[ Alle ]';
     }
 
+    const nextKey = JSON.stringify(state.categories);
+    if (nextKey === renderedCategoriesKey && categoriesBar.children.length > 0) {
+      Array.from(categoriesBar.children).forEach((btn) => {
+        btn.classList.toggle('active', btn.dataset.cat === state.activeCategory);
+      });
+      return;
+    }
+    renderedCategoriesKey = nextKey;
+
+    const pillFrag = document.createDocumentFragment();
     state.categories.forEach((cat) => {
       const btn = document.createElement('button');
       btn.className = 'category-pill' + (cat === state.activeCategory ? ' active' : '');
@@ -675,23 +999,26 @@
       btn.textContent = baseIcons[cat] || '📁 ' + cat;
       btn.addEventListener('click', () => {
         state.activeCategory = cat;
-        document.querySelectorAll('.category-pill').forEach((p) => p.classList.remove('active'));
-        btn.classList.add('active');
+        Array.from(categoriesBar.children).forEach((p) =>
+          p.classList.toggle('active', p === btn)
+        );
         state.selectedIndex = 0;
         filterAndRender();
       });
-      categoriesBar.appendChild(btn);
+      pillFrag.appendChild(btn);
     });
+    categoriesBar.replaceChildren(pillFrag);
 
     if (categoriesDatalist) {
-      categoriesDatalist.innerHTML = '';
+      const optFrag = document.createDocumentFragment();
       state.categories.forEach((cat) => {
         if (!cat.startsWith('[')) {
           const opt = document.createElement('option');
           opt.value = cat;
-          categoriesDatalist.appendChild(opt);
+          optFrag.appendChild(opt);
         }
       });
+      categoriesDatalist.replaceChildren(optFrag);
     }
   }
 
@@ -767,8 +1094,10 @@
     renderList();
   }
 
+  let renderedSelectedCardIndex = -1;
+
   function renderList() {
-    snippetList.innerHTML = '';
+    renderedSelectedCardIndex = -1;
 
     if (state.filteredSnippets.length === 0) {
       snippetList.innerHTML = `
@@ -780,9 +1109,14 @@
       return;
     }
 
+    const frag = document.createDocumentFragment();
+
     state.filteredSnippets.forEach((item, index) => {
+      const isSelected = index === state.selectedIndex;
+      if (isSelected) renderedSelectedCardIndex = index;
+
       const card = document.createElement('div');
-      card.className = 'snippet-card' + (index === state.selectedIndex ? ' selected' : '');
+      card.className = 'snippet-card' + (isSelected ? ' selected' : '');
       card.dataset.index = index;
 
       // Favorite Star Button
@@ -872,35 +1206,67 @@
 
       card.addEventListener('click', () => {
         state.selectedIndex = index;
-        updateCardSelection();
+        updateCardSelection(false);
         handleSnippetAction(item);
       });
 
       card.addEventListener('contextmenu', (e) => {
         e.preventDefault();
         state.selectedIndex = index;
-        updateCardSelection();
+        updateCardSelection(false);
         openContextMenu(e.clientX, e.clientY, item);
       });
 
-      snippetList.appendChild(card);
+      frag.appendChild(card);
     });
 
-    scrollSelectedIntoView();
+    snippetList.replaceChildren(frag);
+    if (state.selectedIndex === 0) {
+      snippetList.scrollTop = 0;
+    } else {
+      scrollSelectedIntoView(false);
+    }
   }
 
-  function updateCardSelection() {
-    const cards = snippetList.querySelectorAll('.snippet-card');
-    cards.forEach((c, idx) => {
-      c.classList.toggle('selected', idx === state.selectedIndex);
-    });
-    scrollSelectedIntoView();
+  function updateCardSelection(smoothScroll = false) {
+    if (
+      renderedSelectedCardIndex >= 0 &&
+      renderedSelectedCardIndex !== state.selectedIndex &&
+      snippetList.children[renderedSelectedCardIndex]
+    ) {
+      snippetList.children[renderedSelectedCardIndex].classList.remove('selected');
+    }
+
+    const nextCard = snippetList.children[state.selectedIndex];
+    if (nextCard && nextCard.classList.contains('snippet-card')) {
+      nextCard.classList.add('selected');
+      renderedSelectedCardIndex = state.selectedIndex;
+    }
+
+    scrollSelectedIntoView(smoothScroll);
   }
 
-  function scrollSelectedIntoView() {
-    const selected = snippetList.querySelector('.snippet-card.selected');
-    if (selected) {
-      selected.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  function scrollSelectedIntoView(smooth = false) {
+    const selected = snippetList.children[state.selectedIndex];
+    if (!selected || !selected.classList.contains('snippet-card')) return;
+
+    if (state.selectedIndex === 0) {
+      if (snippetList.scrollTop > 0) {
+        snippetList.scrollTo({ top: 0, behavior: smooth ? 'smooth' : 'auto' });
+      }
+      return;
+    }
+
+    const containerRect = snippetList.getBoundingClientRect();
+    const cardRect = selected.getBoundingClientRect();
+    const pad = 8;
+
+    if (cardRect.top < containerRect.top + pad) {
+      const delta = cardRect.top - (containerRect.top + pad);
+      snippetList.scrollBy({ top: delta, behavior: smooth ? 'smooth' : 'auto' });
+    } else if (cardRect.bottom > containerRect.bottom - pad) {
+      const delta = cardRect.bottom - (containerRect.bottom - pad);
+      snippetList.scrollBy({ top: delta, behavior: smooth ? 'smooth' : 'auto' });
     }
   }
 
@@ -1077,12 +1443,28 @@
   btnCancelPrompt.addEventListener('click', cancelPrompt);
   btnConfirmPrompt.addEventListener('click', submitPrompt);
 
-  // Context Menu
-  function openContextMenu(x, y, item) {
+  // Context Menu (positioned relative to transformed .app-shell)
+  function openContextMenu(clientX, clientY, item) {
     state.contextMenuSnippet = item;
-    ctxFavorite.textContent = item.favorite ? '☆ Aus Favoriten entfernen' : '⭐ Zu Favoriten hinzufügen';
-    contextMenu.style.left = `${Math.min(x, window.innerWidth - 190)}px`;
-    contextMenu.style.top = `${Math.min(y, window.innerHeight - 200)}px`;
+    ctxFavorite.textContent = item.favorite
+      ? '☆ Aus Favoriten entfernen'
+      : '⭐ Zu Favoriten hinzufügen';
+
+    const shellRect = appShell
+      ? appShell.getBoundingClientRect()
+      : { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight };
+
+    const menuWidth = contextMenu.offsetWidth || 195;
+    const menuHeight = contextMenu.offsetHeight || 195;
+
+    const relX = clientX - shellRect.left;
+    const relY = clientY - shellRect.top;
+
+    const clampedX = Math.max(8, Math.min(relX, shellRect.width - menuWidth - 8));
+    const clampedY = Math.max(8, Math.min(relY, shellRect.height - menuHeight - 8));
+
+    contextMenu.style.left = `${Math.round(clampedX)}px`;
+    contextMenu.style.top = `${Math.round(clampedY)}px`;
     contextMenu.classList.add('active');
   }
 
@@ -1091,9 +1473,57 @@
     state.contextMenuSnippet = null;
   }
 
-  window.addEventListener('click', () => {
-    if (contextMenu.classList.contains('active')) {
+  // Safe Pointer-Down Tracking (prevents accidental modal/backdrop close on text-selection drag)
+  let lastPointerDownTarget = null;
+  window.addEventListener(
+    'pointerdown',
+    (e) => {
+      lastPointerDownTarget = e.target;
+    },
+    true
+  );
+
+  window.addEventListener('click', (e) => {
+    if (contextMenu.classList.contains('active') && !contextMenu.contains(e.target)) {
       closeContextMenu();
+    }
+
+    // Only treat as intentional backdrop/scrim click when pointerdown and click landed on the same overlay element
+    if (e.target !== lastPointerDownTarget) return;
+
+    // 1. Click outside .app-shell on the dimmed screen backdrop
+    if (e.target === screenStage || e.target === screenBackdrop) {
+      if (state.isPinned) return;
+      if (managerModal.classList.contains('active') && isManagerDirty()) {
+        nudgeModal(managerModal);
+        editTitle.focus();
+        return;
+      }
+      stopHotkeyRecording(true);
+      closeAllModals();
+      sendIPC('dismissOverlay');
+      return;
+    }
+
+    // 2. Click on internal modal scrim (.modal-overlay around .modal-box)
+    if (e.target === confirmModal) {
+      resolveConfirmModal(false);
+    } else if (e.target === settingsModal) {
+      stopHotkeyRecording(true);
+      settingsModal.classList.remove('active');
+      searchInput.focus();
+    } else if (e.target === cryptoModal) {
+      cryptoModal.classList.remove('active');
+      searchInput.focus();
+    } else if (e.target === promptModal) {
+      cancelPrompt();
+    } else if (e.target === managerModal) {
+      if (isManagerDirty()) {
+        nudgeModal(managerModal);
+      } else {
+        managerModal.classList.remove('active');
+        searchInput.focus();
+      }
     }
   });
 
@@ -1144,6 +1574,33 @@
   });
 
   // Manager Modal
+  function captureManagerSnapshot() {
+    return JSON.stringify({
+      title: editTitle.value,
+      kuerzel: editKuerzel.value,
+      category: editCategory.value,
+      content: editContent.value,
+      favorite: editFavorite.checked,
+    });
+  }
+
+  function isManagerDirty() {
+    if (!managerModal.classList.contains('active') || !state.managerInitialSnapshot) {
+      return false;
+    }
+    return captureManagerSnapshot() !== state.managerInitialSnapshot;
+  }
+
+  function nudgeModal(modalEl) {
+    if (!modalEl) return;
+    const box = modalEl.querySelector('.modal-box');
+    if (!box) return;
+    box.classList.remove('nudge');
+    void box.offsetWidth;
+    box.classList.add('nudge');
+    setTimeout(() => box.classList.remove('nudge'), 260);
+  }
+
   function openManager(snippet = null) {
     closeContextMenu();
     updateHotstringUI();
@@ -1169,6 +1626,7 @@
       btnDuplicateFromManager.style.display = 'none';
     }
 
+    state.managerInitialSnapshot = captureManagerSnapshot();
     managerModal.classList.add('active');
     setTimeout(() => editTitle.focus(), 50);
   }
@@ -1261,15 +1719,115 @@
     });
   });
 
+  const EDGE_MINI_CAPTIONS = {
+    'top-left': '◤ Ecke oben links',
+    'top-right': '◥ Ecke oben rechts',
+    'bottom-left': '◣ Ecke unten links',
+    'bottom-right': '◢ Ecke unten rechts',
+    left: 'Links',
+    right: 'Rechts',
+    top: 'Oben',
+    bottom: 'Unten',
+  };
+
+  function isCornerEdgeTabPos(pos) {
+    return (
+      pos === 'top-left' ||
+      pos === 'top-right' ||
+      pos === 'bottom-left' ||
+      pos === 'bottom-right'
+    );
+  }
+
+  function renderEdgeTabSettingsUI() {
+    if (settingEdgeTab) {
+      settingEdgeTab.checked = !!state.edgeTabEnabled;
+    }
+    if (edgeTabConfigPanel) {
+      edgeTabConfigPanel.classList.toggle('disabled', !state.edgeTabEnabled);
+    }
+
+    const pos = state.edgeTabPosition || 'left';
+    const pct = Math.max(5, Math.min(95, Math.round(Number(state.edgeTabOffsetPercent) || 42)));
+    const corner = isCornerEdgeTabPos(pos);
+
+    if (settingEdgeTabPosition) {
+      settingEdgeTabPosition.value = pos;
+    }
+    if (settingEdgeTabSize) {
+      settingEdgeTabSize.value = state.edgeTabSize || 'standard';
+    }
+    if (settingEdgeTabLocked) {
+      settingEdgeTabLocked.checked = !!state.edgeTabLocked;
+    }
+
+    edgeSpotButtons.forEach((btn) => {
+      btn.classList.toggle('active', btn.dataset.pos === pos);
+    });
+
+    if (edgeTabMiniMonitor) {
+      edgeTabMiniMonitor.style.setProperty('--mini-offset', `${pct}%`);
+    }
+
+    if (edgeMiniCaption) {
+      const base = EDGE_MINI_CAPTIONS[pos] || pos;
+      edgeMiniCaption.textContent = corner ? `${base}\n(Dreieck)` : `${base} · ${pct} %`;
+      edgeMiniCaption.style.whiteSpace = 'pre-line';
+    }
+
+    if (edgeTabOffsetWrap) {
+      edgeTabOffsetWrap.style.display = corner ? 'none' : 'flex';
+    }
+    if (edgeTabCornerHint) {
+      edgeTabCornerHint.style.display = corner ? 'block' : 'none';
+    }
+    if (!corner) {
+      const isHorizontal = pos === 'top' || pos === 'bottom';
+      if (edgeTabOffsetAxisLabel) {
+        edgeTabOffsetAxisLabel.textContent = isHorizontal
+          ? 'Position am Rand (Horizontal)'
+          : 'Position am Rand (Vertikal)';
+      }
+      if (edgeTabOffsetValue) {
+        edgeTabOffsetValue.textContent = `${pct} %`;
+      }
+      if (settingEdgeTabOffset && document.activeElement !== settingEdgeTabOffset) {
+        settingEdgeTabOffset.value = String(pct);
+      }
+    }
+
+    if (edgeTabDisplayWrap && settingEdgeTabDisplay) {
+      if (Array.isArray(state.displays) && state.displays.length > 1) {
+        edgeTabDisplayWrap.style.display = 'flex';
+        settingEdgeTabDisplay.innerHTML = '';
+        state.displays.forEach((d) => {
+          const opt = document.createElement('option');
+          opt.value = d.isPrimary ? '' : d.id;
+          opt.textContent = `🖥️ ${d.label}`;
+          const isSelected = d.isPrimary
+            ? !state.edgeTabDisplayId || state.edgeTabDisplayId === d.id
+            : state.edgeTabDisplayId === d.id;
+          if (isSelected) opt.selected = true;
+          settingEdgeTabDisplay.appendChild(opt);
+        });
+      } else {
+        edgeTabDisplayWrap.style.display = 'none';
+      }
+    }
+  }
+
   // Settings Modal
   function openSettingsModal() {
     closeContextMenu();
     stopHotkeyRecording(true);
     if (settingAutostart) settingAutostart.checked = state.autostart;
     if (settingTheme) settingTheme.value = state.theme;
+    if (settingBackdropMode) settingBackdropMode.value = state.backdropMode || 'blur';
+    if (settingDimBackground) settingDimBackground.checked = state.dimBackground;
     if (settingRestoreClipboard) settingRestoreClipboard.checked = state.restoreClipboard;
     if (settingDoubleTapCtrl) settingDoubleTapCtrl.checked = state.doubleTapCtrlEnabled;
     if (settingEdgeTab) settingEdgeTab.checked = state.edgeTabEnabled;
+    renderEdgeTabSettingsUI();
     updateHotstringUI();
     renderActiveHotkeys();
     updateSecurityButtonsUI();
@@ -1292,7 +1850,74 @@
 
   if (settingTheme) {
     settingTheme.addEventListener('change', (e) => {
+      state.theme = e.target.value;
+      applyTheme(state.theme);
       sendIPC('setTheme', { theme: e.target.value });
+    });
+  }
+
+  if (settingBackdropMode) {
+    settingBackdropMode.addEventListener('change', (e) => {
+      state.backdropMode = e.target.value;
+      state.dimBackground = state.backdropMode !== 'off';
+      syncBodyClasses();
+      sendIPC('setBackdropMode', { mode: state.backdropMode });
+    });
+  }
+
+  let blurPctDebounceTimer = null;
+  if (settingBackdropBlurPercent) {
+    const parseBlurInput = (raw) => {
+      const parsed = parseInt(raw, 10);
+      return Math.max(0, Math.min(100, Number.isNaN(parsed) ? 65 : parsed));
+    };
+    settingBackdropBlurPercent.addEventListener('input', (e) => {
+      const pct = parseBlurInput(e.target.value);
+      state.backdropBlurPercent = pct;
+      renderBackdropTuneUI();
+      if (blurPctDebounceTimer) clearTimeout(blurPctDebounceTimer);
+      blurPctDebounceTimer = setTimeout(() => {
+        sendIPC('setBackdropBlurPercent', { blurPercent: pct });
+      }, 90);
+    });
+    settingBackdropBlurPercent.addEventListener('change', (e) => {
+      if (blurPctDebounceTimer) clearTimeout(blurPctDebounceTimer);
+      const pct = parseBlurInput(e.target.value);
+      state.backdropBlurPercent = pct;
+      renderBackdropTuneUI();
+      sendIPC('setBackdropBlurPercent', { blurPercent: pct });
+    });
+  }
+
+  let dimPctDebounceTimer = null;
+  if (settingBackdropDimPercent) {
+    const parseDimInput = (raw) => {
+      const parsed = parseInt(raw, 10);
+      return Math.max(0, Math.min(90, Number.isNaN(parsed) ? 60 : parsed));
+    };
+    settingBackdropDimPercent.addEventListener('input', (e) => {
+      const pct = parseDimInput(e.target.value);
+      state.backdropDimPercent = pct;
+      renderBackdropTuneUI();
+      if (dimPctDebounceTimer) clearTimeout(dimPctDebounceTimer);
+      dimPctDebounceTimer = setTimeout(() => {
+        sendIPC('setBackdropDimPercent', { dimPercent: pct });
+      }, 90);
+    });
+    settingBackdropDimPercent.addEventListener('change', (e) => {
+      if (dimPctDebounceTimer) clearTimeout(dimPctDebounceTimer);
+      const pct = parseDimInput(e.target.value);
+      state.backdropDimPercent = pct;
+      renderBackdropTuneUI();
+      sendIPC('setBackdropDimPercent', { dimPercent: pct });
+    });
+  }
+
+  if (settingDimBackground) {
+    settingDimBackground.addEventListener('change', (e) => {
+      state.dimBackground = e.target.checked;
+      syncBodyClasses();
+      sendIPC('setDimBackground', { enabled: e.target.checked });
     });
   }
 
@@ -1322,7 +1947,95 @@
 
   if (settingEdgeTab) {
     settingEdgeTab.addEventListener('change', (e) => {
+      state.edgeTabEnabled = e.target.checked;
+      renderEdgeTabSettingsUI();
       sendIPC('setEdgeTabEnabled', { enabled: e.target.checked });
+    });
+  }
+
+  edgeSpotButtons.forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      const nextPos = btn.dataset.pos;
+      if (!nextPos) return;
+
+      const wasSameEdge = !isCornerEdgeTabPos(nextPos) && state.edgeTabPosition === nextPos;
+      if (wasSameEdge) {
+        const rect = btn.getBoundingClientRect();
+        let ratio = 0.5;
+        if (nextPos === 'top' || nextPos === 'bottom') {
+          ratio = rect.width > 0 ? (e.clientX - rect.left) / rect.width : 0.5;
+        } else {
+          ratio = rect.height > 0 ? (e.clientY - rect.top) / rect.height : 0.5;
+        }
+        const pct = Math.max(5, Math.min(95, Math.round(5 + Math.max(0, Math.min(1, ratio)) * 90)));
+        state.edgeTabOffsetPercent = pct;
+        if (settingEdgeTabOffset) settingEdgeTabOffset.value = String(pct);
+        renderEdgeTabSettingsUI();
+        sendIPC('setEdgeTabOffsetPercent', { offsetPercent: pct });
+        return;
+      }
+
+      state.edgeTabPosition = nextPos;
+      renderEdgeTabSettingsUI();
+      sendIPC('setEdgeTabPosition', { position: nextPos });
+    });
+  });
+
+  if (settingEdgeTabPosition) {
+    settingEdgeTabPosition.addEventListener('change', (e) => {
+      state.edgeTabPosition = e.target.value;
+      renderEdgeTabSettingsUI();
+      sendIPC('setEdgeTabPosition', { position: state.edgeTabPosition });
+    });
+  }
+
+  if (settingEdgeTabOffset) {
+    let offsetDebounce = null;
+    settingEdgeTabOffset.addEventListener('input', (e) => {
+      const pct = Math.max(5, Math.min(95, parseInt(e.target.value, 10) || 42));
+      state.edgeTabOffsetPercent = pct;
+      if (edgeTabOffsetValue) edgeTabOffsetValue.textContent = `${pct} %`;
+      if (edgeTabMiniMonitor) edgeTabMiniMonitor.style.setProperty('--mini-offset', `${pct}%`);
+      if (edgeMiniCaption && !isCornerEdgeTabPos(state.edgeTabPosition)) {
+        const base = EDGE_MINI_CAPTIONS[state.edgeTabPosition] || state.edgeTabPosition;
+        edgeMiniCaption.textContent = `${base} · ${pct} %`;
+      }
+      if (offsetDebounce) clearTimeout(offsetDebounce);
+      offsetDebounce = setTimeout(() => {
+        sendIPC('setEdgeTabOffsetPercent', { offsetPercent: pct });
+      }, 60);
+    });
+    settingEdgeTabOffset.addEventListener('change', (e) => {
+      if (offsetDebounce) {
+        clearTimeout(offsetDebounce);
+        offsetDebounce = null;
+      }
+      const pct = Math.max(5, Math.min(95, parseInt(e.target.value, 10) || 42));
+      state.edgeTabOffsetPercent = pct;
+      sendIPC('setEdgeTabOffsetPercent', { offsetPercent: pct });
+    });
+  }
+
+  if (settingEdgeTabSize) {
+    settingEdgeTabSize.addEventListener('change', (e) => {
+      state.edgeTabSize = e.target.value;
+      renderEdgeTabSettingsUI();
+      sendIPC('setEdgeTabSize', { size: state.edgeTabSize });
+    });
+  }
+
+  if (settingEdgeTabLocked) {
+    settingEdgeTabLocked.addEventListener('change', (e) => {
+      state.edgeTabLocked = e.target.checked;
+      renderEdgeTabSettingsUI();
+      sendIPC('setEdgeTabLocked', { locked: state.edgeTabLocked });
+    });
+  }
+
+  if (settingEdgeTabDisplay) {
+    settingEdgeTabDisplay.addEventListener('change', (e) => {
+      state.edgeTabDisplayId = e.target.value;
+      sendIPC('setEdgeTabDisplayId', { displayId: state.edgeTabDisplayId });
     });
   }
 
@@ -1354,6 +2067,134 @@
       stopHotkeyRecording(true);
       settingsModal.classList.remove('active');
       sendIPC('lockDatabase');
+    });
+  }
+
+  function renderUpdateUI() {
+    const u = state.updateState;
+    const ver = (u && u.currentVersion) || state.version;
+    if (updateStatusHeadline) {
+      updateStatusHeadline.textContent = `SatzTresor v${ver}`;
+    }
+
+    if (!u) return;
+
+    if (settingAutoUpdate) {
+      settingAutoUpdate.checked = !!u.autoUpdateEnabled;
+    }
+    if (settingUpdateRepo && document.activeElement !== settingUpdateRepo) {
+      settingUpdateRepo.value = u.repoSlug || '';
+    }
+
+    const isReadyToInstall = u.status === 'downloaded' || u.status === 'portable-available';
+    if (updateReadyPill && updateReadyLabel) {
+      if (isReadyToInstall && u.availableVersion) {
+        updateReadyLabel.textContent =
+          u.status === 'portable-available'
+            ? `Update v${u.availableVersion} laden`
+            : `Update v${u.availableVersion} – Neu starten`;
+        updateReadyPill.style.display = 'inline-flex';
+      } else {
+        updateReadyPill.style.display = 'none';
+      }
+    }
+
+    if (updateProgressWrap && updateProgressBar) {
+      if (u.status === 'downloading') {
+        updateProgressWrap.style.display = 'block';
+        updateProgressBar.style.width = `${Math.max(4, Math.min(100, u.percent || 0))}%`;
+      } else {
+        updateProgressWrap.style.display = 'none';
+        updateProgressBar.style.width = '0%';
+      }
+    }
+
+    if (!updateStatusDesc || !btnUpdateAction) return;
+
+    btnUpdateAction.disabled = false;
+    btnUpdateAction.classList.remove('ready');
+
+    switch (u.status) {
+      case 'unconfigured':
+        updateStatusDesc.textContent = 'GitHub-Quelle (name/satztresor) unten hinterlegen, um Updates zu aktivieren';
+        btnUpdateAction.textContent = 'Jetzt prüfen';
+        break;
+      case 'checking':
+        updateStatusDesc.textContent = 'Suche nach neuen Versionen auf GitHub…';
+        btnUpdateAction.textContent = 'Prüfe…';
+        btnUpdateAction.disabled = true;
+        break;
+      case 'available':
+        updateStatusDesc.textContent = `Neue Version v${u.availableVersion} verfügbar`;
+        btnUpdateAction.textContent = 'Herunterladen';
+        btnUpdateAction.classList.add('ready');
+        break;
+      case 'downloading':
+        updateStatusDesc.textContent = `Update v${u.availableVersion || ''} wird im Hintergrund geladen (${u.percent || 0} %)…`;
+        btnUpdateAction.textContent = 'Lädt…';
+        btnUpdateAction.disabled = true;
+        break;
+      case 'downloaded':
+        updateStatusDesc.textContent = `Version v${u.availableVersion} geladen — bereit zur sofortigen Installation`;
+        btnUpdateAction.textContent = 'Jetzt neu starten';
+        btnUpdateAction.classList.add('ready');
+        break;
+      case 'portable-available':
+        updateStatusDesc.textContent = `Neue Version v${u.availableVersion} auf GitHub verfügbar`;
+        btnUpdateAction.textContent = 'Herunterladen';
+        btnUpdateAction.classList.add('ready');
+        break;
+      case 'up-to-date':
+        updateStatusDesc.textContent = `SatzTresor v${ver} ist auf dem neuesten Stand`;
+        btnUpdateAction.textContent = 'Jetzt prüfen';
+        break;
+      case 'error':
+        updateStatusDesc.textContent = u.errorMessage || 'Update-Prüfung fehlgeschlagen';
+        btnUpdateAction.textContent = 'Erneut prüfen';
+        break;
+      default:
+        updateStatusDesc.textContent = u.autoUpdateEnabled
+          ? `Automatische Hintergrund-Updates aktiv (${u.repoSlug})`
+          : 'Automatische Updates pausiert';
+        btnUpdateAction.textContent = 'Jetzt prüfen';
+        break;
+    }
+  }
+
+  if (updateReadyPill) {
+    updateReadyPill.addEventListener('click', () => {
+      sendIPC('installUpdateNow');
+    });
+  }
+
+  if (btnUpdateAction) {
+    btnUpdateAction.addEventListener('click', () => {
+      const st = state.updateState?.status;
+      if (st === 'downloaded' || st === 'portable-available' || st === 'available') {
+        sendIPC('installUpdateNow');
+      } else {
+        sendIPC('checkForUpdates');
+      }
+    });
+  }
+
+  if (settingAutoUpdate) {
+    settingAutoUpdate.addEventListener('change', (e) => {
+      sendIPC('setAutoUpdateEnabled', { enabled: e.target.checked });
+    });
+  }
+
+  if (btnSaveUpdateRepo && settingUpdateRepo) {
+    const saveRepo = () => {
+      sendIPC('setUpdateRepo', { repo: settingUpdateRepo.value.trim() });
+    };
+    btnSaveUpdateRepo.addEventListener('click', saveRepo);
+    settingUpdateRepo.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        e.stopPropagation();
+        saveRepo();
+      }
     });
   }
 
@@ -1650,15 +2491,19 @@
     if (e.key === 'ArrowDown') {
       e.preventDefault();
       if (state.filteredSnippets.length > 0) {
+        const prev = state.selectedIndex;
         state.selectedIndex = (state.selectedIndex + 1) % state.filteredSnippets.length;
-        updateCardSelection();
+        const wrapped = state.selectedIndex < prev;
+        updateCardSelection(!e.repeat && !wrapped);
       }
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       if (state.filteredSnippets.length > 0) {
+        const prev = state.selectedIndex;
         state.selectedIndex =
           (state.selectedIndex - 1 + state.filteredSnippets.length) % state.filteredSnippets.length;
-        updateCardSelection();
+        const wrapped = state.selectedIndex > prev;
+        updateCardSelection(!e.repeat && !wrapped);
       }
     } else if (e.key === 'Enter') {
       e.preventDefault();
@@ -1688,9 +2533,13 @@
   });
 
   function initApp() {
-    sendIPC('ready');
+    syncBodyClasses();
+    updateLayoutUI();
+    updatePinUI();
+    renderEdgeTabSettingsUI();
     renderCategories();
     filterAndRender();
+    sendIPC('ready');
   }
 
   if (document.readyState === 'loading') {

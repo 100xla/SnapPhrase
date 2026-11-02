@@ -1,26 +1,35 @@
 /**
- * SatzTresor v1.3.0 — Win32 Native Integration (Koffi FFI)
+ * SatzTresor v1.5.3 — Win32 Native Integration (Koffi FFI)
  * Handles window focus, clipboard protection (Win+V history exclusion),
  * atomic SendInput keyboard simulation, unified Low-Level Keyboard Hook (WH_KEYBOARD_LL)
  * for Double-Tap Ctrl trigger + automatic Hotstring expansion,
- * and multi-monitor aware desktop work area / window docking.
+ * DWM Acrylic full-screen backdrop blur, and multi-monitor aware desktop work area / window docking.
  */
 
 const koffi = require('koffi');
 
-let user32, kernel32;
+let user32, kernel32, dwmapi, gdi32;
 let GetForegroundWindow, SetForegroundWindow, ShowWindow;
 let OpenClipboard, CloseClipboard, RegisterClipboardFormatA, SetClipboardData;
 let GlobalAlloc, GlobalLock, GlobalUnlock, GlobalFree;
 let keybd_event, SendInput, GetAsyncKeyState, GetKeyState;
 let GetWindowThreadProcessId, GetKeyboardLayout, ToUnicodeEx;
 let SetWindowsHookExW, UnhookWindowsHookEx, CallNextHookEx;
-let LowLevelKeyboardProc, KBDLLHOOKSTRUCT, INPUT_STRUCT, RECT_STRUCT;
-let SystemParametersInfoW, GetWindowRect, SetWindowPos, IsZoomed;
+let LowLevelKeyboardProc, KBDLLHOOKSTRUCT, INPUT_STRUCT, RECT_STRUCT, WCA_DATA_STRUCT;
+let SystemParametersInfoW, GetWindowRect, SetWindowPos, IsZoomed, IsWindowVisible, IsIconic, GetClassNameW;
+let SetWindowCompositionAttribute, DwmSetWindowAttribute;
+let GetDC, ReleaseDC;
+let CreateCompatibleDC, DeleteDC, CreateCompatibleBitmap, SelectObject, DeleteObject;
+let BitBlt, SetStretchBltMode, SetBrushOrgEx, StretchBlt, GetDIBits;
 
 try {
   user32 = koffi.load('user32.dll');
   kernel32 = koffi.load('kernel32.dll');
+  try {
+    dwmapi = koffi.load('dwmapi.dll');
+  } catch (e) {
+    dwmapi = null;
+  }
 
   GetForegroundWindow = user32.func('GetForegroundWindow', 'intptr_t', []);
   SetForegroundWindow = user32.func('SetForegroundWindow', 'bool', ['intptr_t']);
@@ -100,6 +109,57 @@ try {
   GetWindowRect = user32.func('GetWindowRect', 'bool', ['intptr_t', '_Out_ RECT *']);
   SetWindowPos = user32.func('SetWindowPos', 'bool', ['intptr_t', 'intptr_t', 'int', 'int', 'int', 'int', 'uint']);
   IsZoomed = user32.func('IsZoomed', 'bool', ['intptr_t']);
+  IsWindowVisible = user32.func('IsWindowVisible', 'bool', ['intptr_t']);
+  IsIconic = user32.func('IsIconic', 'bool', ['intptr_t']);
+  GetClassNameW = user32.func('int __stdcall GetClassNameW(intptr_t hWnd, _Out_ uint16 *lpClassName, int nMaxCount)');
+
+  WCA_DATA_STRUCT = koffi.struct('WINDOWCOMPOSITIONATTRIBDATA', {
+    Attrib: 'int32',
+    pvData: 'void *',
+    cbData: 'uint32',
+  });
+
+  try {
+    SetWindowCompositionAttribute = user32.func(
+      'bool __stdcall SetWindowCompositionAttribute(intptr_t hWnd, WINDOWCOMPOSITIONATTRIBDATA *pAttrData)'
+    );
+  } catch (e) {
+    SetWindowCompositionAttribute = null;
+  }
+
+  if (dwmapi) {
+    try {
+      DwmSetWindowAttribute = dwmapi.func(
+        'int32 __stdcall DwmSetWindowAttribute(intptr_t hwnd, uint32 dwAttribute, void *pvAttribute, uint32 cbAttribute)'
+      );
+    } catch (e) {
+      DwmSetWindowAttribute = null;
+    }
+  }
+
+  try {
+    GetDC = user32.func('intptr_t __stdcall GetDC(intptr_t hWnd)');
+    ReleaseDC = user32.func('int __stdcall ReleaseDC(intptr_t hWnd, intptr_t hDC)');
+    gdi32 = koffi.load('gdi32.dll');
+    CreateCompatibleDC = gdi32.func('intptr_t __stdcall CreateCompatibleDC(intptr_t hdc)');
+    DeleteDC = gdi32.func('bool __stdcall DeleteDC(intptr_t hdc)');
+    CreateCompatibleBitmap = gdi32.func('intptr_t __stdcall CreateCompatibleBitmap(intptr_t hdc, int cx, int cy)');
+    SelectObject = gdi32.func('intptr_t __stdcall SelectObject(intptr_t hdc, intptr_t h)');
+    DeleteObject = gdi32.func('bool __stdcall DeleteObject(intptr_t ho)');
+    BitBlt = gdi32.func(
+      'bool __stdcall BitBlt(intptr_t hdc, int x, int y, int cx, int cy, intptr_t hdcSrc, int x1, int y1, uint32 rop)'
+    );
+    SetStretchBltMode = gdi32.func('int __stdcall SetStretchBltMode(intptr_t hdc, int mode)');
+    SetBrushOrgEx = gdi32.func('bool __stdcall SetBrushOrgEx(intptr_t hdc, int x, int y, void *lppt)');
+    StretchBlt = gdi32.func(
+      'bool __stdcall StretchBlt(intptr_t hdcDest, int xDest, int yDest, int wDest, int hDest, intptr_t hdcSrc, int xSrc, int ySrc, int wSrc, int hSrc, uint32 rop)'
+    );
+    GetDIBits = gdi32.func(
+      'int __stdcall GetDIBits(intptr_t hdc, intptr_t hbm, uint32 start, uint32 cLines, void *lpvBits, void *lpbmi, uint32 usage)'
+    );
+  } catch (e) {
+    gdi32 = null;
+  }
 } catch (err) {
   console.error('[Win32] Failed to load native DLLs:', err);
 }
@@ -166,6 +226,47 @@ function setLastForegroundWindow(hwnd) {
 
 function getLastForegroundWindow() {
   return lastForegroundHwnd;
+}
+
+/**
+ * Returns the physical screen center point of the given window if it is a normal visible app window.
+ * Ignores minimized windows and Windows shell surfaces (Progman, WorkerW, Shell_TrayWnd).
+ */
+function getWindowCenterPhysical(hwnd = lastForegroundHwnd) {
+  if (!hwnd || !GetWindowRect) return null;
+  try {
+    if (IsWindowVisible && !IsWindowVisible(hwnd)) return null;
+    if (IsIconic && IsIconic(hwnd)) return null;
+
+    if (GetClassNameW) {
+      const clsBuf = new Uint16Array(64);
+      const len = GetClassNameW(hwnd, clsBuf, 64);
+      if (len > 0) {
+        const clsName = String.fromCharCode(...clsBuf.subarray(0, len));
+        if (
+          clsName === 'Progman' ||
+          clsName === 'WorkerW' ||
+          clsName === 'Shell_TrayWnd' ||
+          clsName === 'Shell_SecondaryTrayWnd'
+        ) {
+          return null;
+        }
+      }
+    }
+
+    const rect = {};
+    if (!GetWindowRect(hwnd, rect)) return null;
+    const w = rect.right - rect.left;
+    const h = rect.bottom - rect.top;
+    if (w <= 16 || h <= 16) return null;
+
+    return {
+      x: Math.round(rect.left + w / 2),
+      y: Math.round(rect.top + h / 2),
+    };
+  } catch (e) {
+    return null;
+  }
 }
 
 function restoreForegroundWindow(hwnd = lastForegroundHwnd) {
@@ -753,10 +854,232 @@ function restoreWindowsFromDock() {
   }
 }
 
+// ============================================================================
+// 6. Full-Screen Overlay Geometry, Live Desktop Blur Capture & DWM Backdrop
+// ============================================================================
+const HWND_TOPMOST = -1;
+const SWP_NOSENDCHANGING = 0x0400;
+const WCA_ACCENT_POLICY = 19;
+const ACCENT_DISABLED = 0;
+const ACCENT_ENABLE_ACRYLICBLURBEHIND = 4;
+const DWMWA_WINDOW_CORNER_PREFERENCE = 33;
+const DWMWA_BORDER_COLOR = 34;
+const DWMWCP_DEFAULT = 0;
+const DWMWCP_DONOTROUND = 1;
+const DWMWA_COLOR_NONE = 0xfffffffe;
+const SRCCOPY = 0x00cc0020;
+const STRETCH_HALFTONE = 4;
+
+/**
+ * Captures a fast (~2ms) hardware-downsampled 24-bit BMP snapshot of the target physical monitor
+ * right before the overlay opens so CSS/GPU Gaussian blur renders strong, reliable frosted glass
+ * across Windows 10 & Windows 11 (immune to Win11 24H2 DWM black-surface / Energy Saver quirks).
+ * Returns null if the interactive desktop surface cannot be sampled.
+ */
+function captureDisplayBackdrop(physicalBounds) {
+  if (
+    !physicalBounds ||
+    !GetDC ||
+    !ReleaseDC ||
+    !CreateCompatibleDC ||
+    !CreateCompatibleBitmap ||
+    !BitBlt ||
+    !StretchBlt ||
+    !GetDIBits
+  ) {
+    return null;
+  }
+
+  const srcX = Math.round(physicalBounds.x || 0);
+  const srcY = Math.round(physicalBounds.y || 0);
+  const srcW = Math.round(physicalBounds.width || 0);
+  const srcH = Math.round(physicalBounds.height || 0);
+  if (srcW < 32 || srcH < 32) return null;
+
+  // 1/3 resolution width (max 640px) rounded to a multiple of 4 -> fast IPC decode, silky blur + 4-byte aligned 24-bit BGR stride
+  const dstW = Math.max(320, Math.min(640, Math.round(srcW / 12) * 4));
+  const dstH = Math.max(180, Math.min(420, Math.round((srcH * dstW) / srcW)));
+
+  let hdcScreen = 0;
+  let hdcFull = 0;
+  let hbmFull = 0;
+  let oldFull = 0;
+  let hdcSmall = 0;
+  let hbmSmall = 0;
+  let oldSmall = 0;
+
+  try {
+    hdcScreen = GetDC(0);
+    if (!hdcScreen) return null;
+
+    hdcFull = CreateCompatibleDC(hdcScreen);
+    hbmFull = CreateCompatibleBitmap(hdcScreen, srcW, srcH);
+    if (!hdcFull || !hbmFull) return null;
+    oldFull = SelectObject(hdcFull, hbmFull);
+
+    if (!BitBlt(hdcFull, 0, 0, srcW, srcH, hdcScreen, srcX, srcY, SRCCOPY)) {
+      return null;
+    }
+
+    hdcSmall = CreateCompatibleDC(hdcScreen);
+    hbmSmall = CreateCompatibleBitmap(hdcScreen, dstW, dstH);
+    if (!hdcSmall || !hbmSmall) return null;
+    oldSmall = SelectObject(hdcSmall, hbmSmall);
+
+    if (SetStretchBltMode) {
+      SetStretchBltMode(hdcSmall, STRETCH_HALFTONE);
+    }
+    if (SetBrushOrgEx) {
+      SetBrushOrgEx(hdcSmall, 0, 0, null);
+    }
+    if (!StretchBlt(hdcSmall, 0, 0, dstW, dstH, hdcFull, 0, 0, srcW, srcH, SRCCOPY)) {
+      return null;
+    }
+
+    // Deselect bitmaps from memory DCs BEFORE calling GetDIBits (strict MSDN contract)
+    SelectObject(hdcSmall, oldSmall);
+    oldSmall = 0;
+    SelectObject(hdcFull, oldFull);
+    oldFull = 0;
+
+    const pixelBytes = dstW * dstH * 3;
+    const bmpBuf = Buffer.allocUnsafe(54 + pixelBytes);
+
+    // 14-byte BITMAPFILEHEADER
+    bmpBuf.write('BM', 0, 2, 'ascii');
+    bmpBuf.writeUInt32LE(54 + pixelBytes, 2);
+    bmpBuf.writeUInt32LE(0, 6);
+    bmpBuf.writeUInt32LE(54, 10);
+
+    // 40-byte BITMAPINFOHEADER (24-bit opaque BGR, top-down)
+    bmpBuf.writeUInt32LE(40, 14);
+    bmpBuf.writeInt32LE(dstW, 18);
+    bmpBuf.writeInt32LE(-dstH, 22);
+    bmpBuf.writeUInt16LE(1, 26);
+    bmpBuf.writeUInt16LE(24, 28);
+    bmpBuf.writeUInt32LE(0, 30);
+    bmpBuf.writeUInt32LE(pixelBytes, 34);
+    bmpBuf.writeInt32LE(2835, 38);
+    bmpBuf.writeInt32LE(2835, 42);
+    bmpBuf.writeUInt32LE(0, 46);
+    bmpBuf.writeUInt32LE(0, 50);
+
+    const bmiSlice = bmpBuf.subarray(14, 54);
+    const pixelSlice = bmpBuf.subarray(54);
+    const lines = GetDIBits(hdcSmall, hbmSmall, 0, dstH, pixelSlice, bmiSlice, 0);
+    if (!lines) return null;
+
+    // Ensure top-down negative height remains intact after GetDIBits
+    bmpBuf.writeInt32LE(-dstH, 22);
+
+    // Quick sample check to detect non-interactive / locked sessions returning all-zero black
+    let nonZeroFound = false;
+    const step = Math.max(3, Math.floor(pixelBytes / 128));
+    for (let i = 0; i < pixelBytes; i += step) {
+      if (pixelSlice[i] !== 0) {
+        nonZeroFound = true;
+        break;
+      }
+    }
+    if (!nonZeroFound) return null;
+
+    return 'data:image/bmp;base64,' + bmpBuf.toString('base64');
+  } catch (err) {
+    console.error('[Win32] captureDisplayBackdrop error:', err);
+    return null;
+  } finally {
+    if (hdcSmall && oldSmall) SelectObject(hdcSmall, oldSmall);
+    if (hbmSmall) DeleteObject(hbmSmall);
+    if (hdcSmall) DeleteDC(hdcSmall);
+    if (hdcFull && oldFull) SelectObject(hdcFull, oldFull);
+    if (hbmFull) DeleteObject(hbmFull);
+    if (hdcFull) DeleteDC(hdcFull);
+    if (hdcScreen) ReleaseDC(0, hdcScreen);
+  }
+}
+
+/**
+ * Disables DWM rounded corners and window border on frameless transparent overlay/handle windows.
+ */
+function suppressOverlayWindowFrame(hwnd) {
+  if (!hwnd || !DwmSetWindowAttribute) return false;
+  try {
+    const cornerBuf = Buffer.alloc(4);
+    cornerBuf.writeInt32LE(DWMWCP_DONOTROUND, 0);
+    DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, cornerBuf, 4);
+
+    const borderBuf = Buffer.alloc(4);
+    borderBuf.writeUInt32LE(DWMWA_COLOR_NONE, 0);
+    DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR, borderBuf, 4);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+/**
+ * Stretches the overlay HWND across the physical monitor minus 1 physical pixel in height so:
+ * 1) Windows DWM never classifies the `transparent: true` popup as an exclusive fullscreen window (which strips alpha to black), and
+ * 2) It never extends off-screen (avoiding the Windows 11 24H2 off-screen black surface bug).
+ */
+function applyFullscreenOverlayBounds(hwnd, physicalBounds) {
+  if (!hwnd || !SetWindowPos || !physicalBounds) return false;
+  try {
+    suppressOverlayWindowFrame(hwnd);
+
+    return SetWindowPos(
+      hwnd,
+      HWND_TOPMOST,
+      Math.round(physicalBounds.x),
+      Math.round(physicalBounds.y),
+      Math.max(1, Math.round(physicalBounds.width)),
+      Math.max(1, Math.round(physicalBounds.height) - 1),
+      SWP_NOACTIVATE | SWP_NOSENDCHANGING
+    );
+  } catch (err) {
+    console.error('[Win32] applyFullscreenOverlayBounds error:', err);
+    return false;
+  }
+}
+
+/**
+ * Ensures any legacy Windows DWM accent policy is disabled on our `transparent: true` overlay HWND
+ * so Chromium DirectComposition retains clean per-pixel alpha across Windows 10 & Windows 11 24H2.
+ */
+function setWindowBackdropEffect(hwnd, options = {}) {
+  if (!hwnd) return false;
+  const { isPinned = false } = options;
+
+  try {
+    if (isPinned && DwmSetWindowAttribute) {
+      const cornerBuf = Buffer.alloc(4);
+      cornerBuf.writeInt32LE(DWMWCP_DEFAULT, 0);
+      DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, cornerBuf, 4);
+    }
+
+    if (!SetWindowCompositionAttribute) return true;
+    const policyBuf = Buffer.alloc(16);
+    policyBuf.writeInt32LE(ACCENT_DISABLED, 0);
+    policyBuf.writeInt32LE(0, 4);
+    policyBuf.writeUInt32LE(0, 8);
+    policyBuf.writeInt32LE(0, 12);
+
+    return SetWindowCompositionAttribute(hwnd, {
+      Attrib: WCA_ACCENT_POLICY,
+      pvData: policyBuf,
+      cbData: 16,
+    });
+  } catch (err) {
+    console.error('[Win32] setWindowBackdropEffect error:', err);
+    return false;
+  }
+}
+
 module.exports = {
   captureForegroundWindow,
   setLastForegroundWindow,
   getLastForegroundWindow,
+  getWindowCenterPhysical,
   restoreForegroundWindow,
   setClipboardPrivate,
   waitForModifiersReleased,
@@ -770,4 +1093,8 @@ module.exports = {
   restoreDesktopWorkArea,
   alignWindowsToDock,
   restoreWindowsFromDock,
+  captureDisplayBackdrop,
+  suppressOverlayWindowFrame,
+  applyFullscreenOverlayBounds,
+  setWindowBackdropEffect,
 };

@@ -5,6 +5,7 @@ dist/
 # Personal Snippet Database & Backups (never commit or bundle!)
 bausteine.ini
 bausteine.ini.bak
+satztresor-ui.json
 backups/
 *.tmp
 *.bak

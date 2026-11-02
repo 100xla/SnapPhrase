@@ -26,7 +26,9 @@ jobs:
       - name: Install dependencies cleanly
         run: npm ci
 
-      - name: Build Windows Installer & Portable EXE
+      - name: Build Windows Installer, Portable EXE & Auto-Update Metadata (latest.yml + blockmap)
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
         run: npm run build:exe
 
       - name: Generate SHA256 Checksums
@@ -41,11 +43,13 @@ jobs:
           $lines | Set-Content -Path "SHA256SUMS.txt" -Encoding UTF8
           Get-Content "SHA256SUMS.txt"
 
-      - name: Upload Release Artifacts to GitHub Release
+      - name: Upload Release Artifacts & electron-updater Metadata to GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
           files: |
             dist/*.exe
+            dist/*.blockmap
+            dist/latest.yml
             dist/SHA256SUMS.txt

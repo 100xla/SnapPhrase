@@ -1,5 +1,5 @@
 /**
- * SatzTresor v1.3.0 — Storage & INI Database Engine
+ * SatzTresor v1.5.3 — Storage & INI Database Engine
  * Handles atomic file operations, smart hash-verified rolling backups, INI serialization,
  * AES-256-CBC database encryption (lock & password change), JSON/CSV/INI import/export,
  * debounced usage persistence, and application settings.
@@ -14,18 +14,67 @@ const SETTINGS_SECTION = '__SatzTresorSettings__';
 const LEGACY_QT_SECTION = '__QuickTabSettings__';
 const LEGACY_SECTION = '__TabsmartSettings__';
 
+const EDGE_TAB_POSITIONS = [
+  'left',
+  'right',
+  'top',
+  'bottom',
+  'top-left',
+  'top-right',
+  'bottom-left',
+  'bottom-right',
+];
+
+const EDGE_TAB_SIZES = ['compact', 'standard', 'large'];
+
 const UI_SETTING_KEYS = [
   'LayoutMode',
   'IsPinned',
   'SidebarWidth',
+  'CenterCompact',
+  'BackdropMode',
+  'BackdropBlurPercent',
+  'BackdropDimPercent',
+  'BackdropCalibratedV2',
+  'DimBackground',
   'Theme',
   'DoubleTapCtrlEnabled',
   'EdgeTabEnabled',
+  'EdgeTabPosition',
+  'EdgeTabOffsetPercent',
   'EdgeTabYPercent',
+  'EdgeTabSize',
+  'EdgeTabLocked',
+  'EdgeTabDisplayId',
   'HotstringsEnabled',
   'HotstringPrefix',
   'RestoreClipboard',
   'ActiveHotkeys',
+  'AutoUpdateEnabled',
+  'UpdateRepo',
+];
+
+// Non-sensitive UI appearance & trigger preferences cached locally so encrypted/locked startup never flashes or jumps
+const PERSISTED_UI_PREF_KEYS = [
+  'Theme',
+  'BackdropMode',
+  'BackdropBlurPercent',
+  'BackdropDimPercent',
+  'BackdropCalibratedV2',
+  'DimBackground',
+  'CenterCompact',
+  'SidebarWidth',
+  'DoubleTapCtrlEnabled',
+  'EdgeTabEnabled',
+  'EdgeTabPosition',
+  'EdgeTabOffsetPercent',
+  'EdgeTabYPercent',
+  'EdgeTabSize',
+  'EdgeTabLocked',
+  'EdgeTabDisplayId',
+  'ActiveHotkeys',
+  'AutoUpdateEnabled',
+  'UpdateRepo',
 ];
 
 function escapeIniValue(str) {
@@ -80,6 +129,7 @@ class Storage {
   constructor(filePath) {
     this.filePath = filePath;
     this.backupDir = path.join(path.dirname(filePath), 'backups');
+    this.uiPrefsPath = path.join(path.dirname(filePath), 'satztresor-ui.json');
     this.data = new Map(); // Section -> Map(Key -> Value)
     this.cachedSettings = new Map(); // Preserves UI layout/theme settings while locked
     this.isEncrypted = false;
@@ -88,11 +138,92 @@ class Storage {
     this.masterPassword = '';
     this.isLocked = false;
     this._saveTimer = null;
+    this._enforceStartupCenterPending = true;
+  }
+
+  _loadPersistedUiPrefs() {
+    try {
+      if (!fs.existsSync(this.uiPrefsPath)) return;
+      const parsed = JSON.parse(fs.readFileSync(this.uiPrefsPath, 'utf8'));
+      if (!parsed || typeof parsed !== 'object') return;
+      for (const key of PERSISTED_UI_PREF_KEYS) {
+        if (typeof parsed[key] === 'string') {
+          this.cachedSettings.set(key, parsed[key]);
+        }
+      }
+    } catch (e) {}
+  }
+
+  _writePersistedUiPrefs() {
+    try {
+      const out = {};
+      for (const key of PERSISTED_UI_PREF_KEYS) {
+        const val = this.getSetting(key, null);
+        if (val !== null && val !== undefined) {
+          out[key] = String(val);
+        }
+      }
+      const parentDir = path.dirname(this.uiPrefsPath);
+      if (!fs.existsSync(parentDir)) {
+        fs.mkdirSync(parentDir, { recursive: true });
+      }
+      fs.writeFileSync(this.uiPrefsPath, JSON.stringify(out, null, 2), 'utf8');
+    } catch (e) {}
+  }
+
+  _applyStartupCenterLayout() {
+    this.cachedSettings.set('LayoutMode', 'center');
+    this.cachedSettings.set('IsPinned', '0');
+
+    if (this.cachedSettings.get('BackdropCalibratedV2') !== '1') {
+      this.cachedSettings.set('BackdropMode', 'blur');
+      this.cachedSettings.set('BackdropBlurPercent', '65');
+      this.cachedSettings.set('BackdropDimPercent', '60');
+      this.cachedSettings.set('DimBackground', '1');
+      if (this.isLocked) {
+        this._writePersistedUiPrefs();
+      }
+    }
+
+    if (!this.isLocked) {
+      const prevMode = this._readRawSetting('LayoutMode');
+      const prevPinned = this._readRawSetting('IsPinned');
+      const prevCalibrated = this._readRawSetting('BackdropCalibratedV2');
+      if (!this.data.has(SETTINGS_SECTION)) {
+        this.data.set(SETTINGS_SECTION, new Map());
+      }
+      const s = this.data.get(SETTINGS_SECTION);
+      s.set('LayoutMode', 'center');
+      s.set('IsPinned', '0');
+
+      let calibratedNow = false;
+      if (prevCalibrated !== '1') {
+        s.set('BackdropMode', 'blur');
+        s.set('BackdropBlurPercent', '65');
+        s.set('BackdropDimPercent', '60');
+        s.set('DimBackground', '1');
+        s.set('BackdropCalibratedV2', '1');
+        this.cachedSettings.set('BackdropMode', 'blur');
+        this.cachedSettings.set('BackdropBlurPercent', '65');
+        this.cachedSettings.set('BackdropDimPercent', '60');
+        this.cachedSettings.set('DimBackground', '1');
+        this.cachedSettings.set('BackdropCalibratedV2', '1');
+        calibratedNow = true;
+      }
+
+      this._enforceStartupCenterPending = false;
+      this._writePersistedUiPrefs();
+      return calibratedNow || prevMode !== 'center' || (prevPinned !== null && prevPinned !== '0');
+    }
+    return false;
   }
 
   init() {
+    this._loadPersistedUiPrefs();
+
     if (!fs.existsSync(this.filePath)) {
       this.createDefaultDatabase();
+      this._applyStartupCenterLayout();
       this.save();
       return;
     }
@@ -106,15 +237,20 @@ class Storage {
       this.isLocked = true;
       this.encryptionVersion = 2;
       this.rawCipher = raw.substring(7).trim();
+      this._applyStartupCenterLayout();
     } else if (raw.startsWith('STENC:') || raw.startsWith('QTENC:') || raw.startsWith('TSENC:')) {
       this.isEncrypted = true;
       this.isLocked = true;
       this.encryptionVersion = 1;
       this.rawCipher = raw.substring(6).trim();
+      this._applyStartupCenterLayout();
     } else {
       this.isEncrypted = false;
       this.isLocked = false;
       this.parseIni(raw);
+      if (this._applyStartupCenterLayout()) {
+        this.save();
+      }
     }
   }
 
@@ -156,15 +292,28 @@ class Storage {
 
     // Default settings for fresh installations
     const settings = new Map();
-    settings.set('LayoutMode', 'sidebar_left');
+    settings.set('LayoutMode', 'center');
+    settings.set('BackdropMode', 'blur');
+    settings.set('BackdropBlurPercent', '65');
+    settings.set('BackdropDimPercent', '60');
+    settings.set('BackdropCalibratedV2', '1');
+    settings.set('DimBackground', '1');
+    settings.set('CenterCompact', '0');
     settings.set('Theme', 'dark');
     settings.set('DoubleTapCtrlEnabled', '1');
     settings.set('EdgeTabEnabled', '1');
+    settings.set('EdgeTabPosition', 'left');
+    settings.set('EdgeTabOffsetPercent', '42');
     settings.set('EdgeTabYPercent', '42');
+    settings.set('EdgeTabSize', 'standard');
+    settings.set('EdgeTabLocked', '0');
+    settings.set('EdgeTabDisplayId', '');
     settings.set('HotstringsEnabled', '1');
     settings.set('HotstringPrefix', ';;');
     settings.set('RestoreClipboard', '1');
     settings.set('ActiveHotkeys', 'Control+Space');
+    settings.set('AutoUpdateEnabled', '1');
+    settings.set('UpdateRepo', '');
     this.data.set(SETTINGS_SECTION, settings);
     this._syncCachedSettings();
   }
@@ -176,6 +325,7 @@ class Storage {
         this.cachedSettings.set(key, val);
       }
     }
+    this._writePersistedUiPrefs();
   }
 
   _readRawSetting(key) {
@@ -261,10 +411,20 @@ class Storage {
 
       const prefixLen = isSatzTresor ? 28 : 26;
       const plainIni = decrypted.substring(prefixLen);
+      const shouldEnforceCenter = this._enforceStartupCenterPending;
       this.parseIni(plainIni);
 
-      // Upgrade legacy encryption to STENC2 automatically
-      if (this.encryptionVersion !== 2 || !isSatzTresor) {
+      let needsSave = this.encryptionVersion !== 2 || !isSatzTresor;
+      if (shouldEnforceCenter) {
+        if (this._applyStartupCenterLayout()) {
+          needsSave = true;
+        }
+      } else {
+        this._syncCachedSettings();
+      }
+
+      // Upgrade legacy encryption to STENC2 or persist startup center alignment
+      if (needsSave) {
         this.encryptionVersion = 2;
         this.save();
       }
@@ -613,7 +773,12 @@ class Storage {
   setSetting(key, val) {
     const strVal = String(val);
     this.cachedSettings.set(key, strVal);
-    if (this.isLocked) return;
+    if (this.isLocked) {
+      if (PERSISTED_UI_PREF_KEYS.includes(key)) {
+        this._writePersistedUiPrefs();
+      }
+      return;
+    }
 
     if (!this.data.has(SETTINGS_SECTION)) {
       this.data.set(SETTINGS_SECTION, new Map());
@@ -622,12 +787,93 @@ class Storage {
     this.save();
   }
 
-  getLayoutMode() {
-    return this.getSetting('LayoutMode', 'sidebar_left');
+  setSettingsBatch(entries) {
+    if (!entries || typeof entries !== 'object') return;
+    let hasPersistedPref = false;
+    for (const [key, val] of Object.entries(entries)) {
+      const strVal = String(val);
+      this.cachedSettings.set(key, strVal);
+      if (PERSISTED_UI_PREF_KEYS.includes(key)) {
+        hasPersistedPref = true;
+      }
+      if (!this.isLocked) {
+        if (!this.data.has(SETTINGS_SECTION)) {
+          this.data.set(SETTINGS_SECTION, new Map());
+        }
+        this.data.get(SETTINGS_SECTION).set(key, strVal);
+      }
+    }
+    if (this.isLocked) {
+      if (hasPersistedPref) {
+        this._writePersistedUiPrefs();
+      }
+      return;
+    }
+    this.save();
   }
 
-  setLayoutMode(mode) {
-    this.setSetting('LayoutMode', mode);
+  getLayoutMode() {
+    return 'center';
+  }
+
+  setLayoutMode() {
+    this.setSetting('LayoutMode', 'center');
+  }
+
+  getBackdropMode() {
+    const raw = this.getSetting('BackdropMode', '');
+    if (raw === 'blur' || raw === 'solid' || raw === 'off') {
+      return raw;
+    }
+    // Migrate from legacy DimBackground boolean if BackdropMode wasn't explicitly set
+    return this.getSetting('DimBackground', '1') === '0' ? 'off' : 'blur';
+  }
+
+  setBackdropMode(mode) {
+    const allowed = ['blur', 'solid', 'off'];
+    const normalized = allowed.includes(mode) ? mode : 'blur';
+    this.setSetting('BackdropMode', normalized);
+    this.setSetting('DimBackground', normalized !== 'off' ? '1' : '0');
+  }
+
+  getDimBackground() {
+    return this.getBackdropMode() !== 'off';
+  }
+
+  setDimBackground(enabled) {
+    this.setBackdropMode(enabled ? 'blur' : 'off');
+  }
+
+  getBackdropBlurPercent() {
+    const val = parseInt(this.getSetting('BackdropBlurPercent', '65'), 10);
+    if (isNaN(val)) return 65;
+    return Math.max(0, Math.min(100, val));
+  }
+
+  setBackdropBlurPercent(pct) {
+    const num = parseInt(pct, 10);
+    const clamped = Math.max(0, Math.min(100, isNaN(num) ? 65 : num));
+    this.setSetting('BackdropBlurPercent', String(clamped));
+  }
+
+  getBackdropDimPercent() {
+    const val = parseInt(this.getSetting('BackdropDimPercent', '60'), 10);
+    if (isNaN(val)) return 60;
+    return Math.max(0, Math.min(90, val));
+  }
+
+  setBackdropDimPercent(pct) {
+    const num = parseInt(pct, 10);
+    const clamped = Math.max(0, Math.min(90, isNaN(num) ? 60 : num));
+    this.setSetting('BackdropDimPercent', String(clamped));
+  }
+
+  getCenterCompact() {
+    return this.getSetting('CenterCompact', '0') === '1';
+  }
+
+  setCenterCompact(compact) {
+    this.setSetting('CenterCompact', compact ? '1' : '0');
   }
 
   getDoubleTapCtrlEnabled() {
@@ -646,15 +892,69 @@ class Storage {
     this.setSetting('EdgeTabEnabled', enabled ? '1' : '0');
   }
 
-  getEdgeTabYPercent() {
-    const val = parseFloat(this.getSetting('EdgeTabYPercent', '42'));
+  getEdgeTabPosition() {
+    const raw = this.getSetting('EdgeTabPosition', '').trim();
+    if (EDGE_TAB_POSITIONS.includes(raw)) {
+      return raw;
+    }
+    return 'left';
+  }
+
+  setEdgeTabPosition(position) {
+    const clean = EDGE_TAB_POSITIONS.includes(position) ? position : 'left';
+    this.setSetting('EdgeTabPosition', clean);
+  }
+
+  getEdgeTabOffsetPercent() {
+    const rawOffset = this.getSetting('EdgeTabOffsetPercent', '');
+    const fallbackY = this.getSetting('EdgeTabYPercent', '42');
+    const val = parseFloat(rawOffset !== '' ? rawOffset : fallbackY);
     if (isNaN(val)) return 42;
-    return Math.max(8, Math.min(92, val));
+    return Math.max(5, Math.min(95, Math.round(val * 10) / 10));
+  }
+
+  setEdgeTabOffsetPercent(pct) {
+    const num = Number(pct);
+    const clamped = Math.max(5, Math.min(95, Math.round((isNaN(num) ? 42 : num) * 10) / 10));
+    const str = String(clamped);
+    this.setSettingsBatch({
+      EdgeTabOffsetPercent: str,
+      EdgeTabYPercent: String(Math.round(clamped)),
+    });
+  }
+
+  getEdgeTabYPercent() {
+    return this.getEdgeTabOffsetPercent();
   }
 
   setEdgeTabYPercent(pct) {
-    const clamped = Math.max(8, Math.min(92, Math.round(Number(pct) || 42)));
-    this.setSetting('EdgeTabYPercent', String(clamped));
+    this.setEdgeTabOffsetPercent(pct);
+  }
+
+  getEdgeTabSize() {
+    const raw = this.getSetting('EdgeTabSize', 'standard').trim();
+    return EDGE_TAB_SIZES.includes(raw) ? raw : 'standard';
+  }
+
+  setEdgeTabSize(size) {
+    const clean = EDGE_TAB_SIZES.includes(size) ? size : 'standard';
+    this.setSetting('EdgeTabSize', clean);
+  }
+
+  getEdgeTabLocked() {
+    return this.getSetting('EdgeTabLocked', '0') === '1';
+  }
+
+  setEdgeTabLocked(locked) {
+    this.setSetting('EdgeTabLocked', locked ? '1' : '0');
+  }
+
+  getEdgeTabDisplayId() {
+    return this.getSetting('EdgeTabDisplayId', '').trim();
+  }
+
+  setEdgeTabDisplayId(displayId) {
+    this.setSetting('EdgeTabDisplayId', String(displayId || '').trim());
   }
 
   isPinned() {
@@ -719,6 +1019,37 @@ class Storage {
       ? hotkeysArray.map((s) => String(s).trim()).filter(Boolean).join(',')
       : String(hotkeysArray || '');
     this.setSetting('ActiveHotkeys', clean);
+  }
+
+  getAutoUpdateEnabled() {
+    return this.getSetting('AutoUpdateEnabled', '1') === '1';
+  }
+
+  setAutoUpdateEnabled(enabled) {
+    this.setSetting('AutoUpdateEnabled', enabled ? '1' : '0');
+  }
+
+  getUpdateRepo() {
+    return this.getSetting('UpdateRepo', '').trim();
+  }
+
+  setUpdateRepo(repoSlug) {
+    const raw = String(repoSlug || '')
+      .trim()
+      .replace(/^https?:\/\/github\.com\//i, '')
+      .replace(/\.git$/i, '')
+      .replace(/^\/+|\/+$/g, '');
+    if (!raw) {
+      this.setSetting('UpdateRepo', '');
+      return '';
+    }
+    const parts = raw.split('/').filter(Boolean);
+    if (parts.length >= 2) {
+      const normalized = `${parts[0]}/${parts[1]}`;
+      this.setSetting('UpdateRepo', normalized);
+      return normalized;
+    }
+    return this.getUpdateRepo();
   }
 
   encryptDatabase(newPassword) {
@@ -977,5 +1308,8 @@ class Storage {
     }
   }
 }
+
+Storage.EDGE_TAB_POSITIONS = EDGE_TAB_POSITIONS;
+Storage.EDGE_TAB_SIZES = EDGE_TAB_SIZES;
 
 module.exports = Storage;
