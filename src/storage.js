@@ -1,5 +1,5 @@
 /**
- * SatzTresor v1.5.3 — Storage & INI Database Engine
+ * SatzTresor v1.5.4 — Storage & INI Database Engine
  * Handles atomic file operations, smart hash-verified rolling backups, INI serialization,
  * AES-256-CBC database encryption (lock & password change), JSON/CSV/INI import/export,
  * debounced usage persistence, and application settings.

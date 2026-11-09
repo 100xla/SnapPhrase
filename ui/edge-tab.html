@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';">
-  <title>SatzTresor Edge</title>
+  <title></title>
   <style>
     :root {
       --handle-bg: rgba(30, 41, 59, 0.74);
@@ -124,9 +124,12 @@
       justify-content: center;
       cursor: pointer;
       opacity: 0.56;
+      backface-visibility: hidden;
+      transform: translateZ(0);
       transition:
         width 0.14s cubic-bezier(0.16, 1, 0.3, 1),
         height 0.14s cubic-bezier(0.16, 1, 0.3, 1),
+        transform 0.11s cubic-bezier(0.22, 1, 0.36, 1),
         opacity 0.14s ease,
         background 0.14s ease,
         border-color 0.14s ease,
@@ -334,10 +337,18 @@
       stroke-width: 1.8px;
     }
 
+    body.is-edge.pressing:not(.dragging) .edge-handle {
+      transform: scale(0.94) translateZ(0);
+    }
+
     body.is-corner.hovered .corner-icon,
     body.is-corner.dragging .corner-icon {
       opacity: 1;
       transform: scale(1);
+    }
+
+    body.is-corner.pressing:not(.dragging) .corner-handle {
+      transform: scale(0.93) translateZ(0);
     }
   </style>
 </head>

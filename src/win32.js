@@ -1,5 +1,5 @@
 /**
- * SatzTresor v1.5.3 — Win32 Native Integration (Koffi FFI)
+ * SatzTresor v1.5.4 — Win32 Native Integration (Koffi FFI)
  * Handles window focus, clipboard protection (Win+V history exclusion),
  * atomic SendInput keyboard simulation, unified Low-Level Keyboard Hook (WH_KEYBOARD_LL)
  * for Double-Tap Ctrl trigger + automatic Hotstring expansion,
@@ -8,19 +8,21 @@
 
 const koffi = require('koffi');
 
-let user32, kernel32, dwmapi, gdi32;
-let GetForegroundWindow, SetForegroundWindow, ShowWindow;
+let user32, kernel32, dwmapi, gdi32, advapi32;
+let GetForegroundWindow, SetForegroundWindow, ShowWindow, BringWindowToTop, AttachThreadInput;
 let OpenClipboard, CloseClipboard, RegisterClipboardFormatA, SetClipboardData;
-let GlobalAlloc, GlobalLock, GlobalUnlock, GlobalFree;
-let keybd_event, SendInput, GetAsyncKeyState, GetKeyState;
+let GlobalAlloc, GlobalLock, GlobalUnlock, GlobalFree, GetCurrentThreadId;
+let keybd_event, SendInput, GetAsyncKeyState, GetKeyState, MapVirtualKeyW;
 let GetWindowThreadProcessId, GetKeyboardLayout, ToUnicodeEx;
 let SetWindowsHookExW, UnhookWindowsHookEx, CallNextHookEx;
-let LowLevelKeyboardProc, KBDLLHOOKSTRUCT, INPUT_STRUCT, RECT_STRUCT, WCA_DATA_STRUCT;
-let SystemParametersInfoW, GetWindowRect, SetWindowPos, IsZoomed, IsWindowVisible, IsIconic, GetClassNameW;
+let LowLevelKeyboardProc, KBDLLHOOKSTRUCT, INPUT_STRUCT, RECT_STRUCT, WCA_DATA_STRUCT, STYLESTRUCT;
+let WndProcProto, SetWindowLongPtrW, GetWindowLongPtrW, CallWindowProcW;
+let SystemParametersInfoW, GetWindowRect, SetWindowPos, IsWindow, IsZoomed, IsWindowVisible, IsIconic, GetClassNameW;
 let SetWindowCompositionAttribute, DwmSetWindowAttribute;
 let GetDC, ReleaseDC;
 let CreateCompatibleDC, DeleteDC, CreateCompatibleBitmap, SelectObject, DeleteObject;
 let BitBlt, SetStretchBltMode, SetBrushOrgEx, StretchBlt, GetDIBits;
+let RegOpenKeyExW, RegCreateKeyExW, RegQueryValueExW, RegSetValueExW, RegDeleteValueW, RegCloseKey;
 
 try {
   user32 = koffi.load('user32.dll');
@@ -34,6 +36,8 @@ try {
   GetForegroundWindow = user32.func('GetForegroundWindow', 'intptr_t', []);
   SetForegroundWindow = user32.func('SetForegroundWindow', 'bool', ['intptr_t']);
   ShowWindow = user32.func('ShowWindow', 'bool', ['intptr_t', 'int']);
+  BringWindowToTop = user32.func('BringWindowToTop', 'bool', ['intptr_t']);
+  AttachThreadInput = user32.func('bool __stdcall AttachThreadInput(uint32 idAttach, uint32 idAttachTo, bool fAttach)');
 
   OpenClipboard = user32.func('OpenClipboard', 'bool', ['intptr_t']);
   CloseClipboard = user32.func('CloseClipboard', 'bool', []);
@@ -44,10 +48,12 @@ try {
   GlobalLock = kernel32.func('GlobalLock', 'void *', ['intptr_t']);
   GlobalUnlock = kernel32.func('GlobalUnlock', 'bool', ['intptr_t']);
   GlobalFree = kernel32.func('GlobalFree', 'intptr_t', ['intptr_t']);
+  GetCurrentThreadId = kernel32.func('uint32 __stdcall GetCurrentThreadId()');
 
   keybd_event = user32.func('keybd_event', 'void', ['uint8_t', 'uint8_t', 'uint32_t', 'uintptr_t']);
   GetAsyncKeyState = user32.func('GetAsyncKeyState', 'int16_t', ['int']);
   GetKeyState = user32.func('GetKeyState', 'int16_t', ['int']);
+  MapVirtualKeyW = user32.func('uint32 __stdcall MapVirtualKeyW(uint32 uCode, uint32 uMapType)');
 
   const MOUSEINPUT = koffi.struct('MOUSEINPUT', {
     dx: 'long',
@@ -105,13 +111,52 @@ try {
     bottom: 'long',
   });
 
+  STYLESTRUCT = koffi.struct('STYLESTRUCT', {
+    styleOld: 'uint32',
+    styleNew: 'uint32',
+  });
+
+  WndProcProto = koffi.proto(
+    'intptr_t __stdcall WndProc(intptr_t hWnd, uint32 uMsg, uintptr_t wParam, void *lParam)'
+  );
+  const setWinLongName = process.arch === 'ia32' ? 'SetWindowLongW' : 'SetWindowLongPtrW';
+  const getWinLongName = process.arch === 'ia32' ? 'GetWindowLongW' : 'GetWindowLongPtrW';
+  SetWindowLongPtrW = user32.func(`intptr_t __stdcall ${setWinLongName}(intptr_t hWnd, int nIndex, intptr_t dwNewLong)`);
+  GetWindowLongPtrW = user32.func(`intptr_t __stdcall ${getWinLongName}(intptr_t hWnd, int nIndex)`);
+  CallWindowProcW = user32.func(
+    'intptr_t __stdcall CallWindowProcW(intptr_t lpPrevWndFunc, intptr_t hWnd, uint32 uMsg, uintptr_t wParam, void *lParam)'
+  );
+
   SystemParametersInfoW = user32.func('bool __stdcall SystemParametersInfoW(uint32 uiAction, uint32 uiParam, _Inout_ RECT *pvParam, uint32 fWinIni)');
   GetWindowRect = user32.func('GetWindowRect', 'bool', ['intptr_t', '_Out_ RECT *']);
   SetWindowPos = user32.func('SetWindowPos', 'bool', ['intptr_t', 'intptr_t', 'int', 'int', 'int', 'int', 'uint']);
+  IsWindow = user32.func('IsWindow', 'bool', ['intptr_t']);
   IsZoomed = user32.func('IsZoomed', 'bool', ['intptr_t']);
   IsWindowVisible = user32.func('IsWindowVisible', 'bool', ['intptr_t']);
   IsIconic = user32.func('IsIconic', 'bool', ['intptr_t']);
   GetClassNameW = user32.func('int __stdcall GetClassNameW(intptr_t hWnd, _Out_ uint16 *lpClassName, int nMaxCount)');
+
+  try {
+    advapi32 = koffi.load('advapi32.dll');
+    RegOpenKeyExW = advapi32.func(
+      'int32 __stdcall RegOpenKeyExW(intptr_t hKey, str16 lpSubKey, uint32 ulOptions, uint32 samDesired, _Out_ intptr_t *phkResult)'
+    );
+    RegCreateKeyExW = advapi32.func(
+      'int32 __stdcall RegCreateKeyExW(intptr_t hKey, str16 lpSubKey, uint32 Reserved, void *lpClass, uint32 dwOptions, uint32 samDesired, void *lpSecurityAttributes, _Out_ intptr_t *phkResult, _Out_ uint32 *lpdwDisposition)'
+    );
+    RegQueryValueExW = advapi32.func(
+      'int32 __stdcall RegQueryValueExW(intptr_t hKey, str16 lpValueName, void *lpReserved, _Out_ uint32 *lpType, _Out_ uint8 *lpData, _Inout_ uint32 *lpcbData)'
+    );
+    RegSetValueExW = advapi32.func(
+      'int32 __stdcall RegSetValueExW(intptr_t hKey, str16 lpValueName, uint32 Reserved, uint32 dwType, const uint8 *lpData, uint32 cbData)'
+    );
+    RegDeleteValueW = advapi32.func(
+      'int32 __stdcall RegDeleteValueW(intptr_t hKey, str16 lpValueName)'
+    );
+    RegCloseKey = advapi32.func('int32 __stdcall RegCloseKey(intptr_t hKey)');
+  } catch (e) {
+    advapi32 = null;
+  }
 
   WCA_DATA_STRUCT = koffi.struct('WINDOWCOMPOSITIONATTRIBDATA', {
     Attrib: 'int32',
@@ -269,18 +314,73 @@ function getWindowCenterPhysical(hwnd = lastForegroundHwnd) {
   }
 }
 
-function restoreForegroundWindow(hwnd = lastForegroundHwnd) {
+function activateWindowCleanly(hwnd) {
   if (!hwnd || !SetForegroundWindow) return false;
   try {
-    if (keybd_event) {
-      keybd_event(VK_MENU, 0, 0, 0);
-      keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0);
+    if (GetForegroundWindow && GetForegroundWindow() === hwnd) {
+      return true;
     }
-    return SetForegroundWindow(hwnd);
+    if (SetForegroundWindow(hwnd)) {
+      if (!GetForegroundWindow || GetForegroundWindow() === hwnd) {
+        return true;
+      }
+    }
+
+    // Silent thread-input handoff fallback (never taps Alt / VK_MENU, avoiding menu bar activation in target apps)
+    const fgHwnd = GetForegroundWindow ? GetForegroundWindow() : 0;
+    const fgThread = fgHwnd && GetWindowThreadProcessId ? GetWindowThreadProcessId(fgHwnd, null) : 0;
+    const curThread = GetCurrentThreadId ? GetCurrentThreadId() : 0;
+    let attached = false;
+    if (fgThread && curThread && fgThread !== curThread && AttachThreadInput) {
+      attached = AttachThreadInput(curThread, fgThread, true);
+    }
+    try {
+      if (BringWindowToTop) BringWindowToTop(hwnd);
+      return SetForegroundWindow(hwnd);
+    } finally {
+      if (attached && AttachThreadInput) {
+        AttachThreadInput(curThread, fgThread, false);
+      }
+    }
   } catch (e) {
-    console.error('[Win32] restoreForegroundWindow error:', e);
+    console.error('[Win32] activateWindowCleanly error:', e);
     return false;
   }
+}
+
+function restoreForegroundWindow(hwnd = lastForegroundHwnd) {
+  return activateWindowCleanly(hwnd);
+}
+
+function focusOverlayWindow(hwnd) {
+  return activateWindowCleanly(hwnd);
+}
+
+function waitForWindowFocused(hwnd = lastForegroundHwnd, maxWaitMs = 135) {
+  return new Promise((resolve) => {
+    if (!hwnd || !GetForegroundWindow) {
+      setTimeout(resolve, 25);
+      return;
+    }
+    if (GetForegroundWindow() === hwnd) {
+      resolve(true);
+      return;
+    }
+
+    const start = Date.now();
+    const poll = () => {
+      if (GetForegroundWindow() === hwnd) {
+        resolve(true);
+        return;
+      }
+      if (Date.now() - start >= maxWaitMs) {
+        resolve(false);
+        return;
+      }
+      setTimeout(poll, 5);
+    };
+    setTimeout(poll, 5);
+  });
 }
 
 /**
@@ -329,12 +429,13 @@ function setClipboardPrivate() {
 }
 
 function makeKeyInput(vk, isKeyUp = false) {
+  const scan = MapVirtualKeyW ? (MapVirtualKeyW(vk, 0) & 0xffff) : 0;
   return {
     type: INPUT_KEYBOARD,
     u: {
       ki: {
         wVk: vk,
-        wScan: 0,
+        wScan: scan,
         dwFlags: isKeyUp ? KEYEVENTF_KEYUP : 0,
         time: 0,
         dwExtraInfo: 0,
@@ -998,12 +1099,44 @@ function captureDisplayBackdrop(physicalBounds) {
   }
 }
 
+const DWMWA_TRANSITIONS_FORCEDISABLED = 3;
+const GWLP_WNDPROC = -4;
+const GWL_STYLE = -16;
+const GWL_EXSTYLE = -20;
+const WS_POPUP = 0x80000000;
+const STRIP_FRAME_STYLES = 0x00cf0000; // WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU | WS_BORDER | WS_DLGFRAME
+const WS_EX_TOOLWINDOW = 0x00000080;
+const WS_EX_NOACTIVATE = 0x08000000;
+const SWP_NOSIZE = 0x0001;
+const SWP_NOMOVE = 0x0002;
+const WM_QUERYENDSESSION = 0x0011;
+const WM_ERASEBKGND = 0x0014;
+const WM_ENDSESSION = 0x0016;
+const WM_MOUSEACTIVATE = 0x0021;
+const WM_STYLECHANGING = 0x007c;
+const WM_NCDESTROY = 0x0082;
+const WM_NCCALCSIZE = 0x0083;
+const WM_NCPAINT = 0x0085;
+const WM_NCACTIVATE = 0x0086;
+const WM_NCLBUTTONDBLCLK = 0x00a3;
+const MA_NOACTIVATE = 3;
+
+const framelessWindowGuards = new Map();
+
+function sanitizePopupStyle(rawStyle) {
+  return ((rawStyle & ~STRIP_FRAME_STYLES) | WS_POPUP) | 0;
+}
+
 /**
- * Disables DWM rounded corners and window border on frameless transparent overlay/handle windows.
+ * Disables DWM animations, rounded corner bounding box, and window border on frameless transparent overlay/handle windows.
  */
 function suppressOverlayWindowFrame(hwnd) {
   if (!hwnd || !DwmSetWindowAttribute) return false;
   try {
+    const transBuf = Buffer.alloc(4);
+    transBuf.writeInt32LE(1, 0);
+    DwmSetWindowAttribute(hwnd, DWMWA_TRANSITIONS_FORCEDISABLED, transBuf, 4);
+
     const cornerBuf = Buffer.alloc(4);
     cornerBuf.writeInt32LE(DWMWCP_DONOTROUND, 0);
     DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, cornerBuf, 4);
@@ -1013,6 +1146,147 @@ function suppressOverlayWindowFrame(hwnd) {
     DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR, borderBuf, 4);
     return true;
   } catch (e) {
+    return false;
+  }
+}
+
+/**
+ * Installs a native Win32 WS_POPUP + WndProc guard on a frameless transparent BrowserWindow so Windows
+ * can never paint a white GDI non-client title bar / erase brush on click, focus, blur, or show transitions.
+ */
+function installFramelessWindowGuard(hwnd, options = {}) {
+  if (!hwnd || !SetWindowLongPtrW || !GetWindowLongPtrW || !CallWindowProcW || !WndProcProto) {
+    return false;
+  }
+  if (framelessWindowGuards.has(hwnd)) {
+    return true;
+  }
+
+  const { noActivate = false, onSessionEnd = null } = options;
+
+  try {
+    const curStyle = Number(BigInt(GetWindowLongPtrW(hwnd, GWL_STYLE)) & 0xffffffffn);
+    SetWindowLongPtrW(hwnd, GWL_STYLE, sanitizePopupStyle(curStyle));
+
+    if (noActivate) {
+      const curEx = Number(BigInt(GetWindowLongPtrW(hwnd, GWL_EXSTYLE)) & 0xffffffffn);
+      SetWindowLongPtrW(hwnd, GWL_EXSTYLE, (curEx | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE) | 0);
+    }
+
+    suppressOverlayWindowFrame(hwnd);
+
+    const origProc = GetWindowLongPtrW(hwnd, GWLP_WNDPROC);
+    const cb = koffi.register((h, msg, wp, lp) => {
+      try {
+        if (msg === WM_NCACTIVATE) {
+          return 1;
+        }
+        if (msg === WM_NCPAINT) {
+          return 0;
+        }
+        if (msg === WM_ERASEBKGND) {
+          return 1;
+        }
+        if (msg === WM_NCCALCSIZE) {
+          return 0;
+        }
+        if (msg === WM_NCLBUTTONDBLCLK) {
+          return 0;
+        }
+        if (noActivate && msg === WM_MOUSEACTIVATE) {
+          return MA_NOACTIVATE;
+        }
+        if (msg === WM_STYLECHANGING && lp && STYLESTRUCT) {
+          const idx = Number(BigInt.asIntN(32, BigInt(wp)));
+          if (idx === GWL_STYLE) {
+            const s = koffi.decode(lp, STYLESTRUCT);
+            const cleaned = sanitizePopupStyle(s.styleNew) >>> 0;
+            if (cleaned !== s.styleNew) {
+              koffi.encode(lp, STYLESTRUCT, { styleOld: s.styleOld, styleNew: cleaned });
+            }
+          } else if (noActivate && idx === GWL_EXSTYLE) {
+            const s = koffi.decode(lp, STYLESTRUCT);
+            const cleaned = (s.styleNew | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE) >>> 0;
+            if (cleaned !== s.styleNew) {
+              koffi.encode(lp, STYLESTRUCT, { styleOld: s.styleOld, styleNew: cleaned });
+            }
+          }
+          return 0;
+        }
+        if (msg === WM_NCDESTROY) {
+          framelessWindowGuards.delete(h);
+          try {
+            SetWindowLongPtrW(h, GWLP_WNDPROC, origProc);
+          } catch (e) {}
+          return CallWindowProcW(origProc, h, msg, wp, lp);
+        }
+        if ((msg === WM_QUERYENDSESSION || msg === WM_ENDSESSION) && typeof onSessionEnd === 'function') {
+          onSessionEnd();
+        }
+      } catch (err) {
+        console.error('[Win32] WndProc guard error:', err);
+      }
+      return CallWindowProcW(origProc, h, msg, wp, lp);
+    }, koffi.pointer(WndProcProto));
+
+    framelessWindowGuards.set(hwnd, { origProc, cb });
+    SetWindowLongPtrW(hwnd, GWLP_WNDPROC, koffi.address(cb));
+
+    if (SetWindowPos) {
+      SetWindowPos(
+        hwnd,
+        0,
+        0,
+        0,
+        0,
+        0,
+        SWP_NOSIZE | SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_NOSENDCHANGING
+      );
+    }
+    return true;
+  } catch (err) {
+    console.error('[Win32] installFramelessWindowGuard error:', err);
+    return false;
+  }
+}
+
+function removeFramelessWindowGuard(hwnd) {
+  if (!hwnd) return;
+  const entry = framelessWindowGuards.get(hwnd);
+  if (!entry) return;
+  framelessWindowGuards.delete(hwnd);
+  try {
+    if (SetWindowLongPtrW && entry.origProc && (!IsWindow || IsWindow(hwnd))) {
+      SetWindowLongPtrW(hwnd, GWLP_WNDPROC, entry.origProc);
+    }
+  } catch (e) {}
+  // Intentionally keep the 2 lightweight koffi callbacks pinned until process exit so no in-flight Win32 message unwind can fault.
+}
+
+function removeAllFramelessWindowGuards() {
+  for (const hwnd of Array.from(framelessWindowGuards.keys())) {
+    removeFramelessWindowGuard(hwnd);
+  }
+}
+
+/**
+ * Applies exact physical pixel bounds to the Edge-Tab / Corner-Triangle HWND without Chromium's 64x64 minimum clamp.
+ */
+function applyEdgeTabBounds(hwnd, physicalBounds) {
+  if (!hwnd || !SetWindowPos || !physicalBounds) return false;
+  try {
+    suppressOverlayWindowFrame(hwnd);
+    return SetWindowPos(
+      hwnd,
+      HWND_TOPMOST,
+      Math.round(physicalBounds.x),
+      Math.round(physicalBounds.y),
+      Math.max(1, Math.round(physicalBounds.width)),
+      Math.max(1, Math.round(physicalBounds.height)),
+      SWP_NOACTIVATE | SWP_NOSENDCHANGING
+    );
+  } catch (err) {
+    console.error('[Win32] applyEdgeTabBounds error:', err);
     return false;
   }
 }
@@ -1043,19 +1317,14 @@ function applyFullscreenOverlayBounds(hwnd, physicalBounds) {
 }
 
 /**
- * Ensures any legacy Windows DWM accent policy is disabled on our `transparent: true` overlay HWND
+ * Ensures any legacy Windows DWM accent policy and outer DWM border are disabled on our `transparent: true` overlay HWND
  * so Chromium DirectComposition retains clean per-pixel alpha across Windows 10 & Windows 11 24H2.
  */
-function setWindowBackdropEffect(hwnd, options = {}) {
+function setWindowBackdropEffect(hwnd) {
   if (!hwnd) return false;
-  const { isPinned = false } = options;
 
   try {
-    if (isPinned && DwmSetWindowAttribute) {
-      const cornerBuf = Buffer.alloc(4);
-      cornerBuf.writeInt32LE(DWMWCP_DEFAULT, 0);
-      DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, cornerBuf, 4);
-    }
+    suppressOverlayWindowFrame(hwnd);
 
     if (!SetWindowCompositionAttribute) return true;
     const policyBuf = Buffer.alloc(16);
@@ -1075,12 +1344,207 @@ function setWindowBackdropEffect(hwnd, options = {}) {
   }
 }
 
+// ============================================================================
+// 7. Native Windows Autostart Registry Engine (Run + StartupApproved\Run)
+// ============================================================================
+const HKEY_CURRENT_USER = -0x7fffffff; // (LONG)0x80000001 sign-extended to intptr_t
+const KEY_READ = 0x20019;
+const KEY_WRITE = 0x20006;
+const REG_SZ = 1;
+const REG_EXPAND_SZ = 2;
+const REG_BINARY = 3;
+
+const RUN_SUBKEY = 'Software\\Microsoft\\Windows\\CurrentVersion\\Run';
+const STARTUP_APPROVED_SUBKEY = 'Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run';
+const AUTOSTART_VALUE_NAME = 'SatzTresor';
+const LEGACY_AUTOSTART_VALUE_NAME = 'electron.app.SatzTresor';
+
+function buildAutostartCommand({ isPackaged = true, execPath = '', portableExecPath = '', appDir = '' } = {}) {
+  if (isPackaged) {
+    const targetExe = String(portableExecPath || execPath || '').trim();
+    return targetExe ? `"${targetExe}" --hidden` : '';
+  }
+  const cleanExe = String(execPath || '').trim();
+  const cleanDir = String(appDir || '').trim();
+  if (!cleanExe || !cleanDir) return '';
+  return `"${cleanExe}" "${cleanDir}" --hidden`;
+}
+
+function readRegistryStringValue(subKey, valueName) {
+  if (!RegOpenKeyExW || !RegQueryValueExW || !RegCloseKey) return null;
+  const phk = [0];
+  const rcOpen = RegOpenKeyExW(HKEY_CURRENT_USER, subKey, 0, KEY_READ, phk);
+  if (rcOpen !== 0 || !phk[0]) return null;
+  try {
+    const typeOut = [0];
+    const buf = Buffer.alloc(2048);
+    const lenInOut = [buf.length];
+    const rcQ = RegQueryValueExW(phk[0], valueName, null, typeOut, buf, lenInOut);
+    if (rcQ !== 0) return null;
+    if (typeOut[0] !== REG_SZ && typeOut[0] !== REG_EXPAND_SZ) return null;
+    const byteLen = Math.max(0, Math.min(buf.length, lenInOut[0]));
+    return buf.subarray(0, byteLen).toString('utf16le').replace(/\0+$/, '').trim();
+  } finally {
+    RegCloseKey(phk[0]);
+  }
+}
+
+function isStartupApprovedDisabled(valueName) {
+  if (!RegOpenKeyExW || !RegQueryValueExW || !RegCloseKey) return false;
+  const phk = [0];
+  const rcOpen = RegOpenKeyExW(HKEY_CURRENT_USER, STARTUP_APPROVED_SUBKEY, 0, KEY_READ, phk);
+  if (rcOpen !== 0 || !phk[0]) return false;
+  try {
+    const typeOut = [0];
+    const buf = Buffer.alloc(64);
+    const lenInOut = [buf.length];
+    const rcQ = RegQueryValueExW(phk[0], valueName, null, typeOut, buf, lenInOut);
+    if (rcQ !== 0 || lenInOut[0] < 1) return false;
+    // In Windows StartupApproved\Run, odd status byte (0x01, 0x03, 0x05) means disabled in Task Manager / Settings
+    return (buf[0] & 1) !== 0;
+  } finally {
+    RegCloseKey(phk[0]);
+  }
+}
+
+function getWindowsAutostart(options = {}) {
+  try {
+    const primaryVal = readRegistryStringValue(RUN_SUBKEY, AUTOSTART_VALUE_NAME);
+    if (primaryVal) {
+      if (isStartupApprovedDisabled(AUTOSTART_VALUE_NAME)) return false;
+      if (!options.isPackaged && options.appDir) {
+        return primaryVal.toLowerCase().includes(String(options.appDir).toLowerCase());
+      }
+      return true;
+    }
+
+    const legacyVal = readRegistryStringValue(RUN_SUBKEY, LEGACY_AUTOSTART_VALUE_NAME);
+    if (legacyVal) {
+      if (isStartupApprovedDisabled(LEGACY_AUTOSTART_VALUE_NAME)) return false;
+      return true;
+    }
+    return false;
+  } catch (err) {
+    console.error('[Win32] getWindowsAutostart error:', err);
+    return false;
+  }
+}
+
+function setWindowsAutostart(enabled, options = {}) {
+  if (!RegCreateKeyExW || !RegOpenKeyExW || !RegSetValueExW || !RegDeleteValueW || !RegCloseKey) {
+    return { success: false, enabled: false };
+  }
+
+  try {
+    if (enabled) {
+      const cmd = buildAutostartCommand(options);
+      if (!cmd) return { success: false, enabled: false };
+
+      const phkRun = [0];
+      const disp = [0];
+      const rcOpen = RegCreateKeyExW(
+        HKEY_CURRENT_USER,
+        RUN_SUBKEY,
+        0,
+        null,
+        0,
+        KEY_READ | KEY_WRITE,
+        null,
+        phkRun,
+        disp
+      );
+      if (rcOpen !== 0 || !phkRun[0]) {
+        return { success: false, enabled: false };
+      }
+
+      let rcSet = -1;
+      try {
+        const utf16 = Buffer.from(cmd + '\0', 'utf16le');
+        rcSet = RegSetValueExW(phkRun[0], AUTOSTART_VALUE_NAME, 0, REG_SZ, utf16, utf16.length);
+        // Clean up any legacy unquoted Electron entry so there are never duplicate/broken Run items
+        RegDeleteValueW(phkRun[0], LEGACY_AUTOSTART_VALUE_NAME);
+      } finally {
+        RegCloseKey(phkRun[0]);
+      }
+
+      // Ensure Windows Task Manager StartupApproved\Run marks SatzTresor as approved/enabled
+      const phkApp = [0];
+      const rcApp = RegOpenKeyExW(HKEY_CURRENT_USER, STARTUP_APPROVED_SUBKEY, 0, KEY_READ | KEY_WRITE, phkApp);
+      if (rcApp === 0 && phkApp[0]) {
+        try {
+          RegDeleteValueW(phkApp[0], LEGACY_AUTOSTART_VALUE_NAME);
+          const approvedBytes = Buffer.alloc(12, 0);
+          approvedBytes[0] = 0x02;
+          RegSetValueExW(phkApp[0], AUTOSTART_VALUE_NAME, 0, REG_BINARY, approvedBytes, approvedBytes.length);
+        } finally {
+          RegCloseKey(phkApp[0]);
+        }
+      }
+
+      return { success: rcSet === 0, enabled: getWindowsAutostart(options) };
+    }
+
+    // Disable autostart: delete both canonical and legacy values cleanly
+    const phkRun = [0];
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, RUN_SUBKEY, 0, KEY_WRITE, phkRun) === 0 && phkRun[0]) {
+      try {
+        RegDeleteValueW(phkRun[0], AUTOSTART_VALUE_NAME);
+        RegDeleteValueW(phkRun[0], LEGACY_AUTOSTART_VALUE_NAME);
+      } finally {
+        RegCloseKey(phkRun[0]);
+      }
+    }
+
+    const phkApp = [0];
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, STARTUP_APPROVED_SUBKEY, 0, KEY_WRITE, phkApp) === 0 && phkApp[0]) {
+      try {
+        RegDeleteValueW(phkApp[0], AUTOSTART_VALUE_NAME);
+        RegDeleteValueW(phkApp[0], LEGACY_AUTOSTART_VALUE_NAME);
+      } finally {
+        RegCloseKey(phkApp[0]);
+      }
+    }
+
+    return { success: true, enabled: false };
+  } catch (err) {
+    console.error('[Win32] setWindowsAutostart error:', err);
+    return { success: false, enabled: getWindowsAutostart(options) };
+  }
+}
+
+/**
+ * Self-heals existing autostart entries on packaged launch (e.g. migrates legacy unquoted `electron.app.SatzTresor`
+ * to properly quoted `"<exe>" --hidden`, or updates path if the user moved the Portable EXE or reinstalled).
+ */
+function syncWindowsAutostartOnLaunch(options = {}) {
+  if (!options.isPackaged) return;
+  try {
+    const hasPrimary = Boolean(readRegistryStringValue(RUN_SUBKEY, AUTOSTART_VALUE_NAME));
+    const hasLegacy = Boolean(readRegistryStringValue(RUN_SUBKEY, LEGACY_AUTOSTART_VALUE_NAME));
+    if (!hasPrimary && !hasLegacy) return;
+
+    // Respect user's explicit disable in Windows Task Manager
+    if (hasPrimary && isStartupApprovedDisabled(AUTOSTART_VALUE_NAME)) return;
+    if (!hasPrimary && hasLegacy && isStartupApprovedDisabled(LEGACY_AUTOSTART_VALUE_NAME)) return;
+
+    const desiredCmd = buildAutostartCommand(options);
+    const currentPrimary = readRegistryStringValue(RUN_SUBKEY, AUTOSTART_VALUE_NAME);
+    if (desiredCmd && (currentPrimary !== desiredCmd || hasLegacy)) {
+      setWindowsAutostart(true, options);
+    }
+  } catch (err) {
+    console.error('[Win32] syncWindowsAutostartOnLaunch error:', err);
+  }
+}
+
 module.exports = {
   captureForegroundWindow,
   setLastForegroundWindow,
   getLastForegroundWindow,
   getWindowCenterPhysical,
   restoreForegroundWindow,
+  focusOverlayWindow,
+  waitForWindowFocused,
   setClipboardPrivate,
   waitForModifiersReleased,
   simulatePaste,
@@ -1095,6 +1559,13 @@ module.exports = {
   restoreWindowsFromDock,
   captureDisplayBackdrop,
   suppressOverlayWindowFrame,
+  installFramelessWindowGuard,
+  removeFramelessWindowGuard,
+  removeAllFramelessWindowGuards,
+  applyEdgeTabBounds,
   applyFullscreenOverlayBounds,
   setWindowBackdropEffect,
+  getWindowsAutostart,
+  setWindowsAutostart,
+  syncWindowsAutostartOnLaunch,
 };

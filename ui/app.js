@@ -1,5 +1,5 @@
 /**
- * SatzTresor v1.5.3 — Renderer Application Logic
+ * SatzTresor v1.5.4 — Renderer Application Logic
  * Apple-inspired Spotlight UI with token search, smart template prompts, hotstring configuration,
  * automatic background software updates, non-blocking confirmation modals, custom context menu,
  * favorites, and encryption management.
@@ -7,7 +7,7 @@
 
 (function () {
   const state = {
-    version: '1.5.3',
+    version: '1.5.4',
     layoutMode: 'center',
     centerCompact: false,
     backdropMode: 'blur', // 'blur' | 'solid' | 'off'
@@ -347,6 +347,7 @@
         }
         if (data.snippets) {
           state.snippets = data.snippets;
+          snippetsDataRevision++;
         }
         if (data.categories) {
           state.categories = data.categories;
@@ -1094,12 +1095,20 @@
     renderList();
   }
 
+  let snippetsDataRevision = 0;
+  let lastRenderedListKey = '';
   let renderedSelectedCardIndex = -1;
 
   function renderList() {
-    renderedSelectedCardIndex = -1;
+    const rawQuery = searchInput.value.trim().toLowerCase();
+    const nextListKey = `${snippetsDataRevision}|${state.activeCategory}|${rawQuery}|${state.hotstringsEnabled ? '1' : '0'}|${state.hotstringPrefix}`;
 
     if (state.filteredSnippets.length === 0) {
+      renderedSelectedCardIndex = -1;
+      if (lastRenderedListKey === nextListKey && snippetList.querySelector('.empty-state')) {
+        return;
+      }
+      lastRenderedListKey = nextListKey;
       snippetList.innerHTML = `
         <div class="empty-state">
           <div class="empty-title">Keine Bausteine gefunden</div>
@@ -1108,6 +1117,16 @@
       `;
       return;
     }
+
+    if (
+      lastRenderedListKey === nextListKey &&
+      snippetList.children.length === state.filteredSnippets.length
+    ) {
+      updateCardSelection(false);
+      return;
+    }
+    lastRenderedListKey = nextListKey;
+    renderedSelectedCardIndex = -1;
 
     const frag = document.createDocumentFragment();
 
@@ -2533,6 +2552,14 @@
   });
 
   function initApp() {
+    try {
+      const params = new URLSearchParams(window.location.search || '');
+      const initialTheme = params.get('theme');
+      if (initialTheme === 'light' || initialTheme === 'dark') {
+        state.theme = initialTheme;
+        applyTheme(initialTheme);
+      }
+    } catch (e) {}
     syncBodyClasses();
     updateLayoutUI();
     updatePinUI();

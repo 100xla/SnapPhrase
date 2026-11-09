@@ -185,7 +185,10 @@
     didDrag = false;
     startScreenX = e.screenX;
     startScreenY = e.screenY;
-    setIgnoreMouse(false);
+    document.body.classList.add('pressing');
+    if (isCorner(currentPosition)) {
+      setIgnoreMouse(false);
+    }
 
     try {
       dragSurface.setPointerCapture(e.pointerId);
@@ -233,7 +236,7 @@
       dragSurface.releasePointerCapture(pid);
     } catch (err) {}
 
-    document.body.classList.remove('dragging');
+    document.body.classList.remove('dragging', 'pressing');
 
     if (cancelled) {
       if (wasDragging) {
@@ -275,6 +278,20 @@
     e.preventDefault();
     send('edgeTabContextMenu');
   });
+
+  // Apply initial query-string state synchronously before first paint to eliminate startup flicker
+  try {
+    const params = new URLSearchParams(window.location.search || '');
+    const initPos = params.get('pos');
+    if (initPos) {
+      applyVisualState({
+        position: initPos,
+        size: params.get('size') || 'standard',
+        locked: params.get('locked') === '1',
+        theme: params.get('theme') || 'dark',
+      });
+    }
+  } catch (e) {}
 
   send('edgeTabReady');
 })();

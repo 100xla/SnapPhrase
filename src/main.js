@@ -1,5 +1,5 @@
 /**
- * SatzTresor v1.5.3 — Main Process
+ * SatzTresor v1.5.4 — Main Process
  * Supports:
  * - Centered Spotlight Mode (Apple-inspired floating palette with smooth blurred & dimmed desktop backdrop)
  * - Automatic Background Updates via GitHub Releases & NSIS Delta Updates (electron-updater)
@@ -25,6 +25,7 @@ const {
   screen,
   shell,
   nativeImage,
+  nativeTheme,
 } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -32,8 +33,9 @@ const Storage = require('./storage');
 const win32 = require('./win32');
 const { SatzTresorUpdater } = require('./updater');
 
+const APP_ID = 'de.satztresor.app';
 const APP_NAME = 'SatzTresor';
-const APP_VERSION = '1.5.3';
+const APP_VERSION = '1.5.4';
 const EDGE_TAB_CORNER_SNAP_PX = 56;
 const EDGE_TAB_EDGE_MARGIN_PX = 16;
 const CENTER_WIDTH_STANDARD = 780;
@@ -41,7 +43,11 @@ const CENTER_HEIGHT_STANDARD = 560;
 const CENTER_WIDTH_COMPACT = 640;
 const CENTER_HEIGHT_COMPACT = 460;
 const CLOSE_ANIMATION_MS = 195;
-const SHOW_PREPARE_TIMEOUT_MS = 40;
+const SHOW_PREPARE_TIMEOUT_MS = 65;
+
+if (process.platform === 'win32' && typeof app.setAppUserModelId === 'function') {
+  app.setAppUserModelId(APP_ID);
+}
 
 const EDGE_TAB_POSITION_LABELS = {
   'top-left': '◤ Ecke oben links (Dreieck)',
@@ -56,11 +62,15 @@ const EDGE_TAB_POSITION_LABELS = {
 
 let mainWindow = null;
 let edgeTabWindow = null;
+let lastMainIgnoreMouse = false;
+let currentMainAlwaysOnTopLevel = '';
 let lastEdgeTabIgnoreMouse = null;
 let lastSentEdgeTabVisualKey = '';
+let lastAppliedEdgeTabPhysKey = '';
 let isDraggingEdgeTab = false;
 let liveDragEdgeTabState = null;
 let tray = null;
+let lastTrayClickAt = 0;
 let currentTrayMenu = null;
 let updater = null;
 let isQuitting = false;
@@ -78,6 +88,7 @@ let showSequenceCounter = 0;
 let isClosingAnimation = false;
 let rendererDataDirty = true;
 let currentBackdropSnapshot = null;
+let simulatedAutostartForTests = false;
 
 const hasCustomUserDataArg = process.argv.some((arg) => arg.startsWith('--user-data-dir'));
 const launchedHidden =
@@ -165,7 +176,22 @@ storage.init();
 console.log(`[Storage] File: ${storageFile}`);
 console.log(`[Storage] Encrypted: ${storage.isEncrypted}, Locked: ${storage.isLocked}, Layout: ${storage.getLayoutMode()}`);
 
+function getAutostartRuntimeOptions() {
+  return {
+    isPackaged: Boolean(app.isPackaged),
+    execPath: process.execPath,
+    portableExecPath: process.env.PORTABLE_EXECUTABLE_FILE || '',
+    appDir: path.resolve(__dirname, '..'),
+  };
+}
+
 function getAutostartEnabled() {
+  if (hasCustomUserDataArg) {
+    return simulatedAutostartForTests;
+  }
+  if (process.platform === 'win32') {
+    return win32.getWindowsAutostart(getAutostartRuntimeOptions());
+  }
   try {
     if (!app.isPackaged) {
       const settings = app.getLoginItemSettings({
@@ -174,29 +200,65 @@ function getAutostartEnabled() {
       });
       return !!settings.openAtLogin;
     }
-    return !!app.getLoginItemSettings().openAtLogin;
+    return !!app.getLoginItemSettings({ args: ['--hidden'] }).openAtLogin;
   } catch (e) {
     return false;
   }
 }
 
 function setAutostartEnabled(enabled) {
+  const desired = Boolean(enabled);
+  if (hasCustomUserDataArg) {
+    simulatedAutostartForTests = desired;
+    return { success: true, enabled: desired };
+  }
+  if (process.platform === 'win32') {
+    return win32.setWindowsAutostart(desired, getAutostartRuntimeOptions());
+  }
   try {
     if (!app.isPackaged) {
       app.setLoginItemSettings({
-        openAtLogin: !!enabled,
+        openAtLogin: desired,
         path: process.execPath,
         args: [path.resolve(__dirname, '..'), '--hidden'],
       });
     } else {
       app.setLoginItemSettings({
-        openAtLogin: !!enabled,
+        openAtLogin: desired,
         args: ['--hidden'],
       });
     }
+    return { success: true, enabled: getAutostartEnabled() };
   } catch (err) {
     console.error('[Main] setAutostartEnabled error:', err);
+    return { success: false, enabled: getAutostartEnabled() };
   }
+}
+
+function syncSystemTheme() {
+  try {
+    if (nativeTheme) {
+      const targetTheme = storage.getTheme() === 'light' ? 'light' : 'dark';
+      if (nativeTheme.themeSource !== targetTheme) {
+        nativeTheme.themeSource = targetTheme;
+      }
+    }
+  } catch (e) {}
+}
+
+function handleWindowsSessionEnd() {
+  if (isQuitting) return;
+  isQuitting = true;
+  cancelHideAnimation();
+  try {
+    storage.flushSave();
+    win32.restoreWindowsFromDock();
+  } catch (e) {}
+}
+
+syncSystemTheme();
+if (!hasCustomUserDataArg && process.platform === 'win32') {
+  win32.syncWindowsAutostartOnLaunch(getAutostartRuntimeOptions());
 }
 
 async function withSystemDialog(fn) {
@@ -391,6 +453,25 @@ function cancelPendingShow() {
   isPendingShow = false;
 }
 
+function setMainIgnoreMouse(ignore) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const next = Boolean(ignore);
+  if (lastMainIgnoreMouse === next) return;
+  lastMainIgnoreMouse = next;
+  try {
+    mainWindow.setIgnoreMouseEvents(next);
+  } catch (e) {}
+}
+
+function setMainAlwaysOnTopLevel(level) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (currentMainAlwaysOnTopLevel === level) return;
+  currentMainAlwaysOnTopLevel = level;
+  try {
+    mainWindow.setAlwaysOnTop(true, level);
+  } catch (e) {}
+}
+
 function cancelHideAnimation() {
   cancelPendingShow();
   if (hideAnimationTimer) {
@@ -399,9 +480,7 @@ function cancelHideAnimation() {
   }
   isClosingAnimation = false;
   if (mainWindow && !mainWindow.isDestroyed()) {
-    try {
-      mainWindow.setIgnoreMouseEvents(false);
-    } catch (e) {}
+    setMainIgnoreMouse(false);
     syncNativeBackdrop();
   }
 }
@@ -416,10 +495,9 @@ function syncWindowGeometry(triggerSource = 'auto', existingCtx = null) {
   if (isPinned) {
     syncNativeBackdrop();
     setWindowBoundsSafe(mainWindow, targetBounds);
-    mainWindow.setAlwaysOnTop(true, 'floating');
+    setMainAlwaysOnTopLevel('floating');
   } else {
-    mainWindow.setAlwaysOnTop(true, 'screen-saver');
-    setWindowBoundsSafe(mainWindow, targetBounds);
+    setMainAlwaysOnTopLevel('screen-saver');
     win32.applyFullscreenOverlayBounds(getMainWindowHwnd(), ctx.physicalBounds);
     syncNativeBackdrop();
   }
@@ -689,6 +767,33 @@ function sendVisualStateToEdgeTab(override = null, force = false) {
   });
 }
 
+function setEdgeTabBoundsExact(dipBounds, force = false) {
+  if (!edgeTabWindow || edgeTabWindow.isDestroyed() || !dipBounds) return;
+  const targetDip = {
+    x: Math.round(dipBounds.x),
+    y: Math.round(dipBounds.y),
+    width: Math.max(1, Math.round(dipBounds.width)),
+    height: Math.max(1, Math.round(dipBounds.height)),
+  };
+
+  if (process.platform === 'win32') {
+    let phys = targetDip;
+    try {
+      if (typeof screen.dipToScreenRect === 'function') {
+        phys = screen.dipToScreenRect(edgeTabWindow, targetDip);
+      }
+    } catch (e) {}
+
+    const key = `${phys.x}|${phys.y}|${phys.width}|${phys.height}`;
+    if (!force && key === lastAppliedEdgeTabPhysKey) return;
+    lastAppliedEdgeTabPhysKey = key;
+    win32.applyEdgeTabBounds(getEdgeTabHwnd(), phys);
+    return;
+  }
+
+  setWindowBoundsSafe(edgeTabWindow, targetDip);
+}
+
 function createEdgeTabWindow() {
   const b = getEdgeTabBounds();
 
@@ -699,6 +804,7 @@ function createEdgeTabWindow() {
     height: b.height,
     minWidth: 1,
     minHeight: 1,
+    title: '',
     frame: false,
     thickFrame: false,
     transparent: true,
@@ -706,6 +812,9 @@ function createEdgeTabWindow() {
     skipTaskbar: true,
     resizable: false,
     movable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
     focusable: false,
     hasShadow: false,
     show: false,
@@ -717,8 +826,23 @@ function createEdgeTabWindow() {
     },
   });
 
+  if (process.platform === 'win32') {
+    win32.installFramelessWindowGuard(getEdgeTabHwnd(), {
+      noActivate: true,
+      onSessionEnd: handleWindowsSessionEnd,
+    });
+  }
+
   edgeTabWindow.setAlwaysOnTop(true, 'screen-saver');
-  edgeTabWindow.loadFile(path.join(__dirname, '..', 'ui', 'edge-tab.html'));
+  setEdgeTabBoundsExact(b, true);
+  edgeTabWindow.loadFile(path.join(__dirname, '..', 'ui', 'edge-tab.html'), {
+    query: {
+      pos: b.position,
+      size: b.size,
+      locked: storage.getEdgeTabLocked() ? '1' : '0',
+      theme: storage.getTheme(),
+    },
+  });
 
   edgeTabWindow.webContents.on('did-finish-load', () => {
     lastSentEdgeTabVisualKey = '';
@@ -746,12 +870,7 @@ function syncEdgeTabWindow() {
 
   if (shouldShow) {
     const b = getEdgeTabBounds(activeOverride);
-    setWindowBoundsSafe(edgeTabWindow, {
-      x: b.x,
-      y: b.y,
-      width: b.width,
-      height: b.height,
-    });
+    setEdgeTabBoundsExact(b, !edgeTabWindow.isVisible());
     if (isDraggingEdgeTab || !isCornerEdgeTabPosition(b.position)) {
       setEdgeTabIgnoreMouse(false);
     } else if (lastEdgeTabIgnoreMouse === null) {
@@ -759,17 +878,11 @@ function syncEdgeTabWindow() {
     }
     if (!edgeTabWindow.isVisible()) {
       edgeTabWindow.showInactive();
-      win32.suppressOverlayWindowFrame(getEdgeTabHwnd());
+      setEdgeTabBoundsExact(b, true);
     }
-    // Re-apply bounds after showInactive so initial non-resizable creation honors sub-136px widths on Windows
-    setWindowBoundsSafe(edgeTabWindow, {
-      x: b.x,
-      y: b.y,
-      width: b.width,
-      height: b.height,
-    });
   } else if (edgeTabWindow.isVisible()) {
     lastEdgeTabIgnoreMouse = null;
+    lastAppliedEdgeTabPhysKey = '';
     edgeTabWindow.hide();
   }
 }
@@ -790,6 +903,7 @@ function createSatzTresorWindow() {
     height: initialBounds.height,
     minWidth: 1,
     minHeight: 1,
+    title: '',
     frame: false,
     thickFrame: false,
     transparent: true,
@@ -797,6 +911,9 @@ function createSatzTresorWindow() {
     skipTaskbar: true,
     show: false,
     resizable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
     hasShadow: false,
     enableLargerThanScreen: true,
     icon: appIcon,
@@ -809,8 +926,23 @@ function createSatzTresorWindow() {
     },
   });
 
-  mainWindow.setAlwaysOnTop(true, isPinned ? 'floating' : 'screen-saver');
-  mainWindow.loadFile(path.join(__dirname, '..', 'ui', 'index.html'));
+  if (process.platform === 'win32') {
+    win32.installFramelessWindowGuard(getMainWindowHwnd(), {
+      noActivate: false,
+      onSessionEnd: handleWindowsSessionEnd,
+    });
+  }
+
+  setMainAlwaysOnTopLevel(isPinned ? 'floating' : 'screen-saver');
+  if (!isPinned) {
+    win32.applyFullscreenOverlayBounds(getMainWindowHwnd(), ctx.physicalBounds);
+    syncNativeBackdrop();
+  }
+  mainWindow.loadFile(path.join(__dirname, '..', 'ui', 'index.html'), {
+    query: {
+      theme: storage.getTheme(),
+    },
+  });
 
   mainWindow.on('blur', () => {
     if (isRecordingHotkey) {
@@ -922,7 +1054,7 @@ function restartKeyboardHook() {
 function handleHotstringMatch(match, targetHwnd) {
   if (!match || !match.snippet || storage.isLocked) return;
 
-  const savedClipboard = clipboard.readText() || '';
+  const savedClipboard = snapshotClipboard();
   const rawContent = match.snippet.content || '';
   const hasInteractiveVars = /\{\?([^}]+)\}/.test(rawContent);
 
@@ -941,7 +1073,7 @@ function handleHotstringMatch(match, targetHwnd) {
           snippet: match.snippet,
         },
       });
-    }, 30);
+    }, 24);
     return;
   }
 
@@ -950,7 +1082,7 @@ function handleHotstringMatch(match, targetHwnd) {
     storage.incrementUsage(match.snippet.title);
     rebuildHotstringTriggers();
     markDataDirtyAndSync();
-  }, 30);
+  }, 24);
 }
 
 function sendDataToRenderer(options = {}) {
@@ -1009,20 +1141,35 @@ function markDataDirtyAndSync() {
   }
 }
 
+function revealAndFocusMainWindow(ctx, isPinned) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const mainHwnd = getMainWindowHwnd();
+
+  if (!mainWindow.isVisible()) {
+    if (!isPinned && ctx) {
+      win32.applyFullscreenOverlayBounds(mainHwnd, ctx.physicalBounds);
+      syncNativeBackdrop();
+    }
+    // Map surface via SW_SHOWNOACTIVATE first so Windows never triggers synchronous caption redraws before focus
+    mainWindow.showInactive();
+    if (!isPinned && ctx) {
+      win32.applyFullscreenOverlayBounds(mainHwnd, ctx.physicalBounds);
+    }
+  }
+
+  if (process.platform === 'win32') {
+    win32.focusOverlayWindow(mainHwnd);
+  }
+  mainWindow.focus();
+}
+
 function finalizePendingShow(seq) {
   if (!pendingShowContext || pendingShowContext.seq !== seq) return;
   const { ctx, isPinned, postShowMessage } = pendingShowContext;
   cancelPendingShow();
   if (!mainWindow || mainWindow.isDestroyed() || isQuitting) return;
 
-  if (!mainWindow.isVisible()) {
-    mainWindow.show();
-    if (!isPinned && ctx) {
-      win32.applyFullscreenOverlayBounds(getMainWindowHwnd(), ctx.physicalBounds);
-      syncNativeBackdrop();
-    }
-  }
-  mainWindow.focus();
+  revealAndFocusMainWindow(ctx, isPinned);
 
   if (isPinned) {
     updatePinAndDock(true);
@@ -1119,14 +1266,7 @@ function showWindow(options = {}) {
     return;
   }
 
-  if (!mainWindow.isVisible()) {
-    mainWindow.show();
-    if (!isPinned && ctx) {
-      win32.applyFullscreenOverlayBounds(getMainWindowHwnd(), ctx.physicalBounds);
-      syncNativeBackdrop();
-    }
-  }
-  mainWindow.focus();
+  revealAndFocusMainWindow(ctx, isPinned);
 
   if (isPinned) {
     updatePinAndDock(true);
@@ -1183,9 +1323,7 @@ function hideWindowSmoothly({ restoreFocus = false, immediate = false } = {}) {
 
   cancelPendingShow();
   isClosingAnimation = true;
-  try {
-    mainWindow.setIgnoreMouseEvents(true);
-  } catch (e) {}
+  setMainIgnoreMouse(true);
 
   mainWindow.webContents.send('satztresor-msg', { type: 'animateOut' });
   syncEdgeTabWindow();
@@ -1204,7 +1342,7 @@ function hideWindowSmoothly({ restoreFocus = false, immediate = false } = {}) {
     if (mainWindow && !mainWindow.isDestroyed()) {
       try {
         mainWindow.hide();
-        mainWindow.setIgnoreMouseEvents(false);
+        setMainIgnoreMouse(false);
         if (isMainRendererReady && mainWindow.webContents) {
           mainWindow.webContents.send('satztresor-msg', { type: 'resetHiddenState' });
         }
@@ -1294,10 +1432,62 @@ function resolveTemplates(text, sourceClipboardText = null) {
   return resolved;
 }
 
+function snapshotClipboard() {
+  try {
+    const text = clipboard.readText() || '';
+    const html = clipboard.readHTML() || '';
+    const rtf = clipboard.readRTF() || '';
+    const img = clipboard.readImage();
+    const hasImage = Boolean(img && !img.isEmpty());
+    return {
+      text,
+      html,
+      rtf,
+      image: hasImage ? img : null,
+      hasImage,
+    };
+  } catch (e) {
+    return { text: '', html: '', rtf: '', image: null, hasImage: false };
+  }
+}
+
+function restoreClipboardSnapshot(snap, expectedInjectedText = null) {
+  if (snap === null || snap === undefined) return;
+  try {
+    if (expectedInjectedText !== null) {
+      const currentText = clipboard.readText() || '';
+      if (currentText !== expectedInjectedText) {
+        return;
+      }
+    }
+
+    if (typeof snap === 'string') {
+      clipboard.writeText(snap);
+      win32.setClipboardPrivate();
+      return;
+    }
+
+    if (snap.hasImage && snap.image) {
+      const payload = { image: snap.image };
+      if (snap.text) payload.text = snap.text;
+      if (snap.html) payload.html = snap.html;
+      clipboard.write(payload);
+    } else if (snap.html || snap.rtf) {
+      const payload = { text: snap.text || '' };
+      if (snap.html) payload.html = snap.html;
+      if (snap.rtf) payload.rtf = snap.rtf;
+      clipboard.write(payload);
+    } else {
+      clipboard.writeText(snap.text || '');
+    }
+    win32.setClipboardPrivate();
+  } catch (e) {}
+}
+
 async function executePaste(text, savedClipboardOverride = null) {
-  const previousClipboard =
-    savedClipboardOverride !== null ? savedClipboardOverride : (clipboard.readText() || '');
-  let resolved = resolveTemplates(text, previousClipboard);
+  const previousSnap = savedClipboardOverride !== null ? savedClipboardOverride : snapshotClipboard();
+  const previousText = typeof previousSnap === 'string' ? previousSnap : (previousSnap.text || '');
+  let resolved = resolveTemplates(text, previousText);
 
   let cursorOffset = 0;
   const cursorIdx = resolved.indexOf('{cursor}');
@@ -1318,16 +1508,13 @@ async function executePaste(text, savedClipboardOverride = null) {
   if (cursorOffset > 0) {
     setTimeout(() => {
       win32.simulateLeftArrows(cursorOffset);
-    }, 110);
+    }, 95);
   }
 
   if (storage.getRestoreClipboard()) {
     setTimeout(() => {
-      try {
-        clipboard.writeText(previousClipboard);
-        win32.setClipboardPrivate();
-      } catch (e) {}
-    }, 450);
+      restoreClipboardSnapshot(previousSnap, resolved);
+    }, 420);
   }
 }
 
@@ -1648,6 +1835,7 @@ function updateTrayMenu() {
           checked: storage.getTheme() === 'dark',
           click: () => {
             storage.setTheme('dark');
+            syncSystemTheme();
             syncNativeBackdrop();
             syncEdgeTabWindow();
             sendDataToRenderer();
@@ -1660,6 +1848,7 @@ function updateTrayMenu() {
           checked: storage.getTheme() === 'light',
           click: () => {
             storage.setTheme('light');
+            syncSystemTheme();
             syncNativeBackdrop();
             syncEdgeTabWindow();
             sendDataToRenderer();
@@ -1821,7 +2010,15 @@ function setupTray() {
   updateTrayMenu();
 
   tray.on('click', () => {
+    const now = Date.now();
+    if (now - lastTrayClickAt < 240) return;
+    lastTrayClickAt = now;
     toggleWindow(false, 'mouse');
+  });
+
+  tray.on('double-click', () => {
+    lastTrayClickAt = Date.now();
+    showWindow({ source: 'mouse' });
   });
 }
 
@@ -1900,12 +2097,7 @@ ipcMain.on('satztresor-msg', (event, data) => {
           };
           setEdgeTabIgnoreMouse(false);
           sendVisualStateToEdgeTab(liveDragEdgeTabState, false);
-          setWindowBoundsSafe(edgeTabWindow, {
-            x: snap.bounds.x,
-            y: snap.bounds.y,
-            width: snap.bounds.width,
-            height: snap.bounds.height,
-          });
+          setEdgeTabBoundsExact(snap.bounds);
         }
       }
       break;
@@ -1941,7 +2133,9 @@ ipcMain.on('satztresor-msg', (event, data) => {
 
     case 'edgeTabContextMenu': {
       if (currentTrayMenu) {
-        currentTrayMenu.popup();
+        const popupOpts =
+          edgeTabWindow && !edgeTabWindow.isDestroyed() ? { window: edgeTabWindow } : undefined;
+        currentTrayMenu.popup(popupOpts);
       }
       break;
     }
@@ -2000,7 +2194,7 @@ ipcMain.on('satztresor-msg', (event, data) => {
 
     case 'paste': {
       const { title, text } = data;
-      const savedClip = pendingPromptClipboard;
+      const savedClip = pendingPromptClipboard !== null ? pendingPromptClipboard : snapshotClipboard();
       pendingPromptClipboard = null;
 
       const isPinned = storage.isPinned();
@@ -2008,24 +2202,27 @@ ipcMain.on('satztresor-msg', (event, data) => {
         hideWindowSmoothly({ restoreFocus: false });
       }
 
-      setTimeout(() => {
+      (async () => {
         const targetHwnd = win32.getLastForegroundWindow();
-        win32.restoreForegroundWindow(targetHwnd);
+        if (targetHwnd) {
+          win32.restoreForegroundWindow(targetHwnd);
+          await win32.waitForWindowFocused(targetHwnd, 135);
+        } else {
+          await new Promise((r) => setTimeout(r, 25));
+        }
 
-        setTimeout(async () => {
-          await executePaste(text, savedClip);
-          if (title) {
-            storage.incrementUsage(title);
-            markDataDirtyAndSync();
-          }
-          if (isPinned && mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('satztresor-msg', {
-              type: 'showToast',
-              message: '✓ Eingefügt',
-            });
-          }
-        }, 40);
-      }, 18);
+        await executePaste(text, savedClip);
+        if (title) {
+          storage.incrementUsage(title);
+          markDataDirtyAndSync();
+        }
+        if (isPinned && mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('satztresor-msg', {
+            type: 'showToast',
+            message: '✓ Eingefügt',
+          });
+        }
+      })().catch((err) => console.error('[Main] paste error:', err));
       break;
     }
 
@@ -2136,6 +2333,7 @@ ipcMain.on('satztresor-msg', (event, data) => {
     case 'setTheme': {
       if (data.theme) {
         storage.setTheme(data.theme);
+        syncSystemTheme();
         syncNativeBackdrop();
         syncEdgeTabWindow();
         sendDataToRenderer();
@@ -2194,12 +2392,19 @@ ipcMain.on('satztresor-msg', (event, data) => {
 
     case 'setAutostart': {
       const enabled = !!data.enabled;
-      setAutostartEnabled(enabled);
+      const res = setAutostartEnabled(enabled);
+      const actualEnabled = res && typeof res.enabled === 'boolean' ? res.enabled : getAutostartEnabled();
       sendDataToRenderer();
       updateTrayMenu();
+      const toastText =
+        res && res.success === false
+          ? '⚠️ Autostart konnte nicht geändert werden'
+          : actualEnabled
+            ? '✓ Mit Windows starten aktiviert'
+            : '✓ Mit Windows starten deaktiviert';
       mainWindow.webContents.send('satztresor-msg', {
         type: 'showToast',
-        message: enabled ? '✓ Autostart aktiviert' : '✓ Autostart deaktiviert',
+        message: toastText,
       });
       break;
     }
@@ -2532,6 +2737,7 @@ function prepareQuitForUpdate() {
   storage.flushSave();
   win32.restoreWindowsFromDock();
   win32.stopKeyboardHook();
+  win32.removeAllFramelessWindowGuards();
   globalShortcut.unregisterAll();
   if (tray) {
     try {
@@ -2552,6 +2758,7 @@ function prepareQuitForUpdate() {
 }
 
 function applyThemeAndBoundsAfterUnlock() {
+  syncSystemTheme();
   if (!mainWindow) return;
   syncWindowGeometry();
   if (storage.isPinned()) {
@@ -2601,9 +2808,14 @@ app.whenReady().then(() => {
   }
 });
 
+app.on('session-end', () => {
+  handleWindowsSessionEnd();
+});
+
 app.on('before-quit', () => {
   isQuitting = true;
   cancelHideAnimation();
+  win32.removeAllFramelessWindowGuards();
 });
 
 app.on('will-quit', () => {
@@ -2614,6 +2826,7 @@ app.on('will-quit', () => {
   storage.flushSave();
   win32.restoreWindowsFromDock();
   win32.stopKeyboardHook();
+  win32.removeAllFramelessWindowGuards();
   globalShortcut.unregisterAll();
   if (tray) {
     try {

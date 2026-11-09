@@ -1,7 +1,7 @@
 {
   "name": "satztresor",
-  "version": "1.5.3",
-  "description": "SatzTresor v1.5.3 — Moderner, lokaler Satzbaustein-Manager mit AES-256-Verschlüsselung & automatischer Textersetzung",
+  "version": "1.5.4",
+  "description": "SatzTresor v1.5.4 — Moderner, lokaler Satzbaustein-Manager mit AES-256-Verschlüsselung & automatischer Textersetzung",
   "author": "SatzTresor Project",
   "license": "MIT",
   "main": "src/main.js",
