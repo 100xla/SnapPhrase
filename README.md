@@ -5,7 +5,7 @@
 ### Dein lokaler, verschlüsselter Satzbaustein-Manager für Windows
 **Blitzschnelle Textvorlagen & automatische Kürzel-Ersetzung — 100 % Offline. 0 % Cloud. 0 € Abo.**
 
-[![Version](https://img.shields.io/badge/Version-1.5.4-2563eb?style=for-the-badge)](./package.json)
+[![Version](https://img.shields.io/badge/Version-1.5.5-2563eb?style=for-the-badge)](./package.json)
 [![Plattform](https://img.shields.io/badge/Windows-10%20%2F%2011%20(x64)-0078d4?style=for-the-badge&logo=windows)](./package.json)
 [![Datenschutz](https://img.shields.io/badge/100%25%20Lokal-Zero%20Cloud-10b981?style=for-the-badge)](./PRIVACY.md)
 [![Verschlüsselung](https://img.shields.io/badge/AES--256-PBKDF2%20%2B%20HMAC-8b5cf6?style=for-the-badge)](./src/crypto.js)
@@ -33,7 +33,7 @@ Wähle den passenden Weg für deinen PC:
 | 🟢 Weg 1: Microsoft Store *(Empfohlen für normale PCs)* | 🔵 Weg 2: Direkt-Download *(Für Büro-PCs & Puristen)* |
 | :--- | :--- |
 | **1-Klick-Installation ohne Windows-Warnmeldung**<br>*(Durch Microsoft signiert + automatische Updates)* | **Keine Store-Anmeldung & keine Admin-Rechte nötig**<br>*(Ideal, wenn auf dem Büro-PC der Store gesperrt ist)* |
-| 👉 **[Im Microsoft Store öffnen](#)** *(In Kürze verfügbar)* | 👉 **[SatzTresor-Portable-1.5.4.exe](../../releases/latest)** *(Direktstart ohne Installation / USB-Stick)*<br>👉 **[SatzTresor-Setup-1.5.4.exe](../../releases/latest)** *(Klassischer Windows-Installer)* |
+| 👉 **[Im Microsoft Store öffnen](#)** *(In Kürze verfügbar)* | 👉 **[SatzTresor-Portable-1.5.5.exe](../../releases/latest)** *(Direktstart ohne Installation / USB-Stick)*<br>👉 **[SatzTresor-Setup-1.5.5.exe](../../releases/latest)** *(Klassischer Windows-Installer)* |
 
 <details>
 <summary>💡 <b>Wichtiger Hinweis beim Direkt-Download (.exe): Warum zeigt Windows beim 1. Start ein blaues Fenster?</b> (Hier klicken)</summary>
@@ -57,8 +57,8 @@ SatzTresor ist ein komplett kostenloses Open-Source-Projekt ohne kommerzielle Ei
 
 ### 1. Drei blitzschnelle Aufruf-Wege
 * **2× kurz `Strg` antippen:** Zweimal kurz hintereinander die `Strg`-Taste drücken — öffnet SatzTresor sofort, ohne laufende Texteingaben zu stören.
-* **Bildschirmrand-Lasche (Edge-Tab):** Dezenter, frei verschiebbarer Reiter am linken oder rechten Bildschirmrand für die reine Mausbedienung mit 1 Klick.
 * **Frei wählbares Tastenkürzel:** Standardmäßig `Strg + Leertaste` — oder nimm in den Einstellungen deine eigene Wunsch-Taste auf (z. B. `F9`, `Rollen`, `Strg + #`).
+* **System-Tray-Schnellzugriff:** 1 Klick auf das SatzTresor-Symbol im Windows-Infobereich (rechts neben der Uhr) für die direkte Mausbedienung.
 
 ### 2. ⚡ Automatische Kürzel-Ersetzung (Hotstrings) beim Tippen
 Tippe in **jedem beliebigen Windows-Programm** (Outlook, Word, Browser, CRM, Praxissoftware) einfach dein Kürzel — z. B. `;;mfg` — und SatzTresor ersetzt es noch während des Tippens automatisch durch deinen fertigen Textbaustein.
@@ -75,7 +75,7 @@ Bausteine können dynamische Felder enthalten, die beim Einfügen automatisch au
 * `{?Anrede=Frau|Herr|Guten Tag}` — Öffnet beim Einfügen eine Schnellauswahl
 
 ### 4. Klares Spotlight-Design & Pin-Modus
-* **Zentriertes Spotlight-Fenster:** Ruhiges, aufgeräumtes Suchfenster exakt in der Bildschirmmitte (wahlweise Standard `780×560` oder Kompakt `640×460`).
+* **Zentriertes Spotlight-Fenster:** Ruhiges, aufgeräumtes Suchfenster exakt in der Bildschirmmitte (wahlweise Großansicht `1120×780` oder Kompaktansicht `580×380`).
 * **Sanfter Fokus-Hintergrund:** Der Desktop hinter SatzTresor wird weichgezeichnet und dezent abgedunkelt (Unschärfe & Abdunklung in den Einstellungen stufenlos anpassbar).
 * **📌 Pin-Modus:** Fixiert SatzTresor bei Bedarf dauerhaft frei verschiebbar im Vordergrund (ohne Hintergrund-Abdunklung).
 

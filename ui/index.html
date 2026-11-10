@@ -27,6 +27,11 @@
     <input type="text" id="searchInput" class="search-input" placeholder="Satzbaustein suchen..." autofocus autocomplete="off" spellcheck="false">
     <div class="search-badges">
       <span id="matchCountBadge" class="badge-kbd">0</span>
+      <button id="btnNewSnippetQuick" class="btn-new-snippet" title="Neuen Satzbaustein anlegen (Strg+N)">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+        <span>Neu</span>
+      </button>
+      <span class="toolbar-divider" aria-hidden="true"></span>
       <button id="btnLockNow" class="btn-pin" style="display: none;" title="Datenbank jetzt sperren (Strg+L)">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
@@ -39,17 +44,19 @@
           <path d="M5 17h14v-2l-2-3V6a2 2 0 0 0-2-2h-6a2 2 0 0 0-2 2v6l-2 3v2z"></path>
         </svg>
       </button>
-      <button id="btnToggleWidth" class="btn-pin" title="Fenstergröße umschalten (Standard / Kompakt)">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <button id="btnToggleWidth" class="btn-pin" title="Kompaktansicht (580×380) aktivieren">
+        <svg id="iconShrinkWindow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="4 14 10 14 10 20"></polyline>
           <polyline points="20 10 14 10 14 4"></polyline>
           <line x1="14" y1="10" x2="21" y2="3"></line>
           <line x1="3" y1="21" x2="10" y2="14"></line>
         </svg>
-      </button>
-      <button id="btnNewSnippetQuick" class="btn-new-snippet" title="Neuen Satzbaustein anlegen (Strg+N)">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-        <span>+ Neu</span>
+        <svg id="iconExpandWindow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" style="display: none;">
+          <polyline points="15 3 21 3 21 9"></polyline>
+          <polyline points="9 21 3 21 3 15"></polyline>
+          <line x1="21" y1="3" x2="14" y2="10"></line>
+          <line x1="3" y1="21" x2="10" y2="14"></line>
+        </svg>
       </button>
       <button id="btnOpenSettings" class="btn-pin" title="Einstellungen öffnen">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -87,7 +94,7 @@
           <path d="M13 7l-3 5h4l-3 5"/>
         </svg>
         SatzTresor
-        <span id="versionTag" class="version-pill">v1.5.4</span>
+        <span id="versionTag" class="version-pill">v1.5.5</span>
       </div>
       <button id="updateReadyPill" class="update-ready-pill" style="display: none;" title="Update jetzt installieren und neu starten">
         <span class="update-dot"></span>
@@ -331,87 +338,6 @@
           </label>
         </div>
 
-        <div class="settings-row" style="border-bottom: none; padding-bottom: 4px;">
-          <div class="settings-label-group">
-            <span class="settings-title">Bildschirmrand- &amp; Ecken-Lasche (Maus-Tab)</span>
-            <span class="settings-desc">An allen 4 Rändern oder als Dreieck in den Ecken (frei ziehbar &amp; einstellbar)</span>
-          </div>
-          <label class="switch">
-            <input type="checkbox" id="settingEdgeTab">
-            <span class="slider"></span>
-          </label>
-        </div>
-
-        <div id="edgeTabConfigPanel" class="edge-tab-config-panel">
-          <div class="edge-mini-monitor-wrap">
-            <div id="edgeTabMiniMonitor" class="edge-mini-monitor" aria-label="Position am Bildschirm wählen">
-              <div class="edge-mini-taskbar" aria-hidden="true"></div>
-              <span id="edgeMiniCaption" class="edge-mini-caption">Links · 42 %</span>
-
-              <!-- 4 Corner Triangles -->
-              <button type="button" class="edge-spot corner spot-top-left" data-pos="top-left" title="◤ Ecke oben links (Dreieck)"></button>
-              <button type="button" class="edge-spot corner spot-top-right" data-pos="top-right" title="◥ Ecke oben rechts (Dreieck)"></button>
-              <button type="button" class="edge-spot corner spot-bottom-left" data-pos="bottom-left" title="◣ Ecke unten links (Dreieck)"></button>
-              <button type="button" class="edge-spot corner spot-bottom-right" data-pos="bottom-right" title="◢ Ecke unten rechts (Dreieck)"></button>
-
-              <!-- 4 Screen Edges -->
-              <button type="button" class="edge-spot side spot-top" data-pos="top" title="▲ Oberer Bildschirmrand"><span class="spot-pill"></span></button>
-              <button type="button" class="edge-spot side spot-bottom" data-pos="bottom" title="▼ Unterer Bildschirmrand"><span class="spot-pill"></span></button>
-              <button type="button" class="edge-spot side spot-left active" data-pos="left" title="◀ Linker Bildschirmrand"><span class="spot-pill"></span></button>
-              <button type="button" class="edge-spot side spot-right" data-pos="right" title="▶ Rechter Bildschirmrand"><span class="spot-pill"></span></button>
-            </div>
-            <span class="edge-mini-subhint">Ecke oder Rand anklicken</span>
-          </div>
-
-          <div class="edge-tab-controls-col">
-            <div class="edge-ctrl-row">
-              <select id="settingEdgeTabPosition" class="form-select edge-ctrl-select" title="Position der Startlasche">
-                <optgroup label="Display-Ecken (Dreieck)">
-                  <option value="top-left">◤ Ecke oben links (Dreieck)</option>
-                  <option value="top-right">◥ Ecke oben rechts (Dreieck)</option>
-                  <option value="bottom-left">◣ Ecke unten links (Dreieck)</option>
-                  <option value="bottom-right">◢ Ecke unten rechts (Dreieck)</option>
-                </optgroup>
-                <optgroup label="Bildschirmränder (Lasche)">
-                  <option value="left">◀ Linker Bildschirmrand</option>
-                  <option value="right">▶ Rechter Bildschirmrand</option>
-                  <option value="top">▲ Oberer Bildschirmrand</option>
-                  <option value="bottom">▼ Unterer Bildschirmrand</option>
-                </optgroup>
-              </select>
-            </div>
-
-            <div id="edgeTabOffsetWrap" class="edge-offset-wrap">
-              <div class="edge-offset-label-row">
-                <span id="edgeTabOffsetAxisLabel">Position am Rand (Vertikal)</span>
-                <span id="edgeTabOffsetValue" class="edge-offset-badge">42 %</span>
-              </div>
-              <input type="range" id="settingEdgeTabOffset" class="edge-range-input" min="5" max="95" step="1" value="42">
-            </div>
-
-            <div id="edgeTabCornerHint" class="edge-corner-hint" style="display: none;">
-              📐 Dreieck sitzt passgenau in der Display-Ecke
-            </div>
-
-            <div class="edge-ctrl-inline-row">
-              <select id="settingEdgeTabSize" class="form-select edge-size-select" title="Größe der Lasche / des Dreiecks">
-                <option value="compact">Größe: Kompakt</option>
-                <option value="standard" selected>Größe: Standard</option>
-                <option value="large">Größe: Groß</option>
-              </select>
-
-              <label class="edge-lock-chip" title="Verhindert versehentliches Verschieben mit der Maus">
-                <input type="checkbox" id="settingEdgeTabLocked">
-                <span>🔒 Fixieren</span>
-              </label>
-            </div>
-
-            <div id="edgeTabDisplayWrap" class="edge-ctrl-row" style="display: none;">
-              <select id="settingEdgeTabDisplay" class="form-select edge-ctrl-select" title="Bildschirm für Lasche auswählen"></select>
-            </div>
-          </div>
-        </div>
-
         <div class="settings-row" style="flex-direction: column; align-items: stretch; gap: 8px;">
           <div class="settings-label-group">
             <span class="settings-title">Tastenkombinationen</span>
@@ -453,7 +379,7 @@
 
         <div class="settings-row update-status-card">
           <div class="settings-label-group" style="flex: 1; min-width: 0;">
-            <span class="settings-title" id="updateStatusHeadline">SatzTresor v1.5.4</span>
+            <span class="settings-title" id="updateStatusHeadline">SatzTresor v1.5.5</span>
             <span class="settings-desc" id="updateStatusDesc">Automatische Hintergrund-Updates bereit</span>
             <div id="updateProgressWrap" class="update-progress-wrap" style="display: none;">
               <div id="updateProgressBar" class="update-progress-bar" style="width: 0%;"></div>

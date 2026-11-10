@@ -1,5 +1,5 @@
 /**
- * SatzTresor v1.5.4 — Win32 Native Integration (Koffi FFI)
+ * SatzTresor v1.5.5 — Win32 Native Integration (Koffi FFI)
  * Handles window focus, clipboard protection (Win+V history exclusion),
  * atomic SendInput keyboard simulation, unified Low-Level Keyboard Hook (WH_KEYBOARD_LL)
  * for Double-Tap Ctrl trigger + automatic Hotstring expansion,
@@ -1270,28 +1270,6 @@ function removeAllFramelessWindowGuards() {
 }
 
 /**
- * Applies exact physical pixel bounds to the Edge-Tab / Corner-Triangle HWND without Chromium's 64x64 minimum clamp.
- */
-function applyEdgeTabBounds(hwnd, physicalBounds) {
-  if (!hwnd || !SetWindowPos || !physicalBounds) return false;
-  try {
-    suppressOverlayWindowFrame(hwnd);
-    return SetWindowPos(
-      hwnd,
-      HWND_TOPMOST,
-      Math.round(physicalBounds.x),
-      Math.round(physicalBounds.y),
-      Math.max(1, Math.round(physicalBounds.width)),
-      Math.max(1, Math.round(physicalBounds.height)),
-      SWP_NOACTIVATE | SWP_NOSENDCHANGING
-    );
-  } catch (err) {
-    console.error('[Win32] applyEdgeTabBounds error:', err);
-    return false;
-  }
-}
-
-/**
  * Stretches the overlay HWND across the physical monitor minus 1 physical pixel in height so:
  * 1) Windows DWM never classifies the `transparent: true` popup as an exclusive fullscreen window (which strips alpha to black), and
  * 2) It never extends off-screen (avoiding the Windows 11 24H2 off-screen black surface bug).
@@ -1562,7 +1540,6 @@ module.exports = {
   installFramelessWindowGuard,
   removeFramelessWindowGuard,
   removeAllFramelessWindowGuards,
-  applyEdgeTabBounds,
   applyFullscreenOverlayBounds,
   setWindowBackdropEffect,
   getWindowsAutostart,

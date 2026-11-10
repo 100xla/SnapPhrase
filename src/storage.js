@@ -1,5 +1,5 @@
 /**
- * SatzTresor v1.5.4 — Storage & INI Database Engine
+ * SatzTresor v1.5.5 — Storage & INI Database Engine
  * Handles atomic file operations, smart hash-verified rolling backups, INI serialization,
  * AES-256-CBC database encryption (lock & password change), JSON/CSV/INI import/export,
  * debounced usage persistence, and application settings.
@@ -14,19 +14,6 @@ const SETTINGS_SECTION = '__SatzTresorSettings__';
 const LEGACY_QT_SECTION = '__QuickTabSettings__';
 const LEGACY_SECTION = '__TabsmartSettings__';
 
-const EDGE_TAB_POSITIONS = [
-  'left',
-  'right',
-  'top',
-  'bottom',
-  'top-left',
-  'top-right',
-  'bottom-left',
-  'bottom-right',
-];
-
-const EDGE_TAB_SIZES = ['compact', 'standard', 'large'];
-
 const UI_SETTING_KEYS = [
   'LayoutMode',
   'IsPinned',
@@ -39,13 +26,6 @@ const UI_SETTING_KEYS = [
   'DimBackground',
   'Theme',
   'DoubleTapCtrlEnabled',
-  'EdgeTabEnabled',
-  'EdgeTabPosition',
-  'EdgeTabOffsetPercent',
-  'EdgeTabYPercent',
-  'EdgeTabSize',
-  'EdgeTabLocked',
-  'EdgeTabDisplayId',
   'HotstringsEnabled',
   'HotstringPrefix',
   'RestoreClipboard',
@@ -65,13 +45,6 @@ const PERSISTED_UI_PREF_KEYS = [
   'CenterCompact',
   'SidebarWidth',
   'DoubleTapCtrlEnabled',
-  'EdgeTabEnabled',
-  'EdgeTabPosition',
-  'EdgeTabOffsetPercent',
-  'EdgeTabYPercent',
-  'EdgeTabSize',
-  'EdgeTabLocked',
-  'EdgeTabDisplayId',
   'ActiveHotkeys',
   'AutoUpdateEnabled',
   'UpdateRepo',
@@ -301,13 +274,6 @@ class Storage {
     settings.set('CenterCompact', '0');
     settings.set('Theme', 'dark');
     settings.set('DoubleTapCtrlEnabled', '1');
-    settings.set('EdgeTabEnabled', '1');
-    settings.set('EdgeTabPosition', 'left');
-    settings.set('EdgeTabOffsetPercent', '42');
-    settings.set('EdgeTabYPercent', '42');
-    settings.set('EdgeTabSize', 'standard');
-    settings.set('EdgeTabLocked', '0');
-    settings.set('EdgeTabDisplayId', '');
     settings.set('HotstringsEnabled', '1');
     settings.set('HotstringPrefix', ';;');
     settings.set('RestoreClipboard', '1');
@@ -884,79 +850,6 @@ class Storage {
     this.setSetting('DoubleTapCtrlEnabled', enabled ? '1' : '0');
   }
 
-  getEdgeTabEnabled() {
-    return this.getSetting('EdgeTabEnabled', '1') === '1';
-  }
-
-  setEdgeTabEnabled(enabled) {
-    this.setSetting('EdgeTabEnabled', enabled ? '1' : '0');
-  }
-
-  getEdgeTabPosition() {
-    const raw = this.getSetting('EdgeTabPosition', '').trim();
-    if (EDGE_TAB_POSITIONS.includes(raw)) {
-      return raw;
-    }
-    return 'left';
-  }
-
-  setEdgeTabPosition(position) {
-    const clean = EDGE_TAB_POSITIONS.includes(position) ? position : 'left';
-    this.setSetting('EdgeTabPosition', clean);
-  }
-
-  getEdgeTabOffsetPercent() {
-    const rawOffset = this.getSetting('EdgeTabOffsetPercent', '');
-    const fallbackY = this.getSetting('EdgeTabYPercent', '42');
-    const val = parseFloat(rawOffset !== '' ? rawOffset : fallbackY);
-    if (isNaN(val)) return 42;
-    return Math.max(5, Math.min(95, Math.round(val * 10) / 10));
-  }
-
-  setEdgeTabOffsetPercent(pct) {
-    const num = Number(pct);
-    const clamped = Math.max(5, Math.min(95, Math.round((isNaN(num) ? 42 : num) * 10) / 10));
-    const str = String(clamped);
-    this.setSettingsBatch({
-      EdgeTabOffsetPercent: str,
-      EdgeTabYPercent: String(Math.round(clamped)),
-    });
-  }
-
-  getEdgeTabYPercent() {
-    return this.getEdgeTabOffsetPercent();
-  }
-
-  setEdgeTabYPercent(pct) {
-    this.setEdgeTabOffsetPercent(pct);
-  }
-
-  getEdgeTabSize() {
-    const raw = this.getSetting('EdgeTabSize', 'standard').trim();
-    return EDGE_TAB_SIZES.includes(raw) ? raw : 'standard';
-  }
-
-  setEdgeTabSize(size) {
-    const clean = EDGE_TAB_SIZES.includes(size) ? size : 'standard';
-    this.setSetting('EdgeTabSize', clean);
-  }
-
-  getEdgeTabLocked() {
-    return this.getSetting('EdgeTabLocked', '0') === '1';
-  }
-
-  setEdgeTabLocked(locked) {
-    this.setSetting('EdgeTabLocked', locked ? '1' : '0');
-  }
-
-  getEdgeTabDisplayId() {
-    return this.getSetting('EdgeTabDisplayId', '').trim();
-  }
-
-  setEdgeTabDisplayId(displayId) {
-    this.setSetting('EdgeTabDisplayId', String(displayId || '').trim());
-  }
-
   isPinned() {
     return this.getSetting('IsPinned', '0') === '1';
   }
@@ -1308,8 +1201,5 @@ class Storage {
     }
   }
 }
-
-Storage.EDGE_TAB_POSITIONS = EDGE_TAB_POSITIONS;
-Storage.EDGE_TAB_SIZES = EDGE_TAB_SIZES;
 
 module.exports = Storage;

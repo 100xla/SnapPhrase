@@ -1,5 +1,5 @@
 /**
- * SatzTresor v1.5.4 — Cryptography Engine
+ * SatzTresor v1.5.5 — Cryptography Engine
  * AES-256-CBC + PBKDF2-SHA256 (100,000 rounds) + HMAC-SHA256 + Base64
  * 100% byte-compatible with bausteine.ini formats (STENC2:, QTENC2:, TSENC2:, QTENC:, TSENC:)
  */

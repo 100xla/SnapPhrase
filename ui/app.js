@@ -1,5 +1,5 @@
 /**
- * SatzTresor v1.5.4 — Renderer Application Logic
+ * SatzTresor v1.5.5 — Renderer Application Logic
  * Apple-inspired Spotlight UI with token search, smart template prompts, hotstring configuration,
  * automatic background software updates, non-blocking confirmation modals, custom context menu,
  * favorites, and encryption management.
@@ -7,7 +7,7 @@
 
 (function () {
   const state = {
-    version: '1.5.4',
+    version: '1.5.5',
     layoutMode: 'center',
     centerCompact: false,
     backdropMode: 'blur', // 'blur' | 'solid' | 'off'
@@ -21,13 +21,6 @@
     theme: 'dark',
     autostart: false,
     doubleTapCtrlEnabled: true,
-    edgeTabEnabled: true,
-    edgeTabPosition: 'left',
-    edgeTabOffsetPercent: 42,
-    edgeTabSize: 'standard',
-    edgeTabLocked: false,
-    edgeTabDisplayId: '',
-    displays: [],
     hotstringsEnabled: true,
     hotstringPrefix: ';;',
     restoreClipboard: true,
@@ -64,6 +57,8 @@
   const btnLockNow = document.getElementById('btnLockNow');
   const btnPinWindow = document.getElementById('btnPinWindow');
   const btnToggleWidth = document.getElementById('btnToggleWidth');
+  const iconShrinkWindow = document.getElementById('iconShrinkWindow');
+  const iconExpandWindow = document.getElementById('iconExpandWindow');
   const btnNewSnippetQuick = document.getElementById('btnNewSnippetQuick');
   const btnOpenSettings = document.getElementById('btnOpenSettings');
   const btnCollapseWindow = document.getElementById('btnCollapseWindow');
@@ -107,21 +102,6 @@
   const hotstringPrefixRow = document.getElementById('hotstringPrefixRow');
   const hotstringDescPreview = document.getElementById('hotstringDescPreview');
   const settingDoubleTapCtrl = document.getElementById('settingDoubleTapCtrl');
-  const settingEdgeTab = document.getElementById('settingEdgeTab');
-  const edgeTabConfigPanel = document.getElementById('edgeTabConfigPanel');
-  const edgeTabMiniMonitor = document.getElementById('edgeTabMiniMonitor');
-  const edgeMiniCaption = document.getElementById('edgeMiniCaption');
-  const edgeSpotButtons = document.querySelectorAll('.edge-spot');
-  const settingEdgeTabPosition = document.getElementById('settingEdgeTabPosition');
-  const edgeTabOffsetWrap = document.getElementById('edgeTabOffsetWrap');
-  const edgeTabOffsetAxisLabel = document.getElementById('edgeTabOffsetAxisLabel');
-  const edgeTabOffsetValue = document.getElementById('edgeTabOffsetValue');
-  const settingEdgeTabOffset = document.getElementById('settingEdgeTabOffset');
-  const edgeTabCornerHint = document.getElementById('edgeTabCornerHint');
-  const settingEdgeTabSize = document.getElementById('settingEdgeTabSize');
-  const settingEdgeTabLocked = document.getElementById('settingEdgeTabLocked');
-  const edgeTabDisplayWrap = document.getElementById('edgeTabDisplayWrap');
-  const settingEdgeTabDisplay = document.getElementById('settingEdgeTabDisplay');
   const activeHotkeysList = document.getElementById('activeHotkeysList');
   const btnRecordHotkey = document.getElementById('btnRecordHotkey');
   const btnImportData = document.getElementById('btnImportData');
@@ -320,28 +300,6 @@
           state.doubleTapCtrlEnabled = !!data.doubleTapCtrlEnabled;
           if (settingDoubleTapCtrl) settingDoubleTapCtrl.checked = state.doubleTapCtrlEnabled;
         }
-        if (typeof data.edgeTabEnabled !== 'undefined') {
-          state.edgeTabEnabled = !!data.edgeTabEnabled;
-          if (settingEdgeTab) settingEdgeTab.checked = state.edgeTabEnabled;
-        }
-        if (typeof data.edgeTabPosition === 'string') {
-          state.edgeTabPosition = data.edgeTabPosition;
-        }
-        if (typeof data.edgeTabOffsetPercent === 'number') {
-          state.edgeTabOffsetPercent = data.edgeTabOffsetPercent;
-        }
-        if (typeof data.edgeTabSize === 'string') {
-          state.edgeTabSize = data.edgeTabSize;
-        }
-        if (typeof data.edgeTabLocked !== 'undefined') {
-          state.edgeTabLocked = !!data.edgeTabLocked;
-        }
-        if (typeof data.edgeTabDisplayId === 'string') {
-          state.edgeTabDisplayId = data.edgeTabDisplayId;
-        }
-        if (Array.isArray(data.displays)) {
-          state.displays = data.displays;
-        }
         if (Array.isArray(data.activeHotkeys)) {
           state.activeHotkeys = data.activeHotkeys;
         }
@@ -359,7 +317,6 @@
         }
         updateSecurityButtonsUI();
         updateHotstringUI();
-        renderEdgeTabSettingsUI();
         renderActiveHotkeys();
         filterAndRender();
         break;
@@ -838,10 +795,12 @@
   function updateWidthToggleButtonUI() {
     if (!btnToggleWidth) return;
     const isCompact = !!state.centerCompact;
-    btnToggleWidth.classList.toggle('active', isCompact);
+    btnToggleWidth.classList.remove('active');
+    if (iconShrinkWindow) iconShrinkWindow.style.display = isCompact ? 'none' : 'block';
+    if (iconExpandWindow) iconExpandWindow.style.display = isCompact ? 'block' : 'none';
     btnToggleWidth.title = isCompact
-      ? 'Standardgröße (780×560) wiederherstellen'
-      : 'Kompaktgröße (640×460) aktivieren';
+      ? 'Großansicht (1120×780) aktivieren'
+      : 'Kompaktansicht (580×380) aktivieren';
   }
 
   function updateLayoutUI() {
@@ -1112,7 +1071,7 @@
       snippetList.innerHTML = `
         <div class="empty-state">
           <div class="empty-title">Keine Bausteine gefunden</div>
-          <div class="empty-hint">Drücke <kbd class="badge-kbd">Strg+N</kbd> oder klicke <kbd class="badge-kbd">+ Neu</kbd>, um einen Baustein anzulegen</div>
+          <div class="empty-hint">Drücke <kbd class="badge-kbd">Strg+N</kbd> oder klicke oben auf <kbd class="badge-kbd">+ Neu</kbd>, um einen Baustein anzulegen</div>
         </div>
       `;
       return;
@@ -1738,103 +1697,6 @@
     });
   });
 
-  const EDGE_MINI_CAPTIONS = {
-    'top-left': '◤ Ecke oben links',
-    'top-right': '◥ Ecke oben rechts',
-    'bottom-left': '◣ Ecke unten links',
-    'bottom-right': '◢ Ecke unten rechts',
-    left: 'Links',
-    right: 'Rechts',
-    top: 'Oben',
-    bottom: 'Unten',
-  };
-
-  function isCornerEdgeTabPos(pos) {
-    return (
-      pos === 'top-left' ||
-      pos === 'top-right' ||
-      pos === 'bottom-left' ||
-      pos === 'bottom-right'
-    );
-  }
-
-  function renderEdgeTabSettingsUI() {
-    if (settingEdgeTab) {
-      settingEdgeTab.checked = !!state.edgeTabEnabled;
-    }
-    if (edgeTabConfigPanel) {
-      edgeTabConfigPanel.classList.toggle('disabled', !state.edgeTabEnabled);
-    }
-
-    const pos = state.edgeTabPosition || 'left';
-    const pct = Math.max(5, Math.min(95, Math.round(Number(state.edgeTabOffsetPercent) || 42)));
-    const corner = isCornerEdgeTabPos(pos);
-
-    if (settingEdgeTabPosition) {
-      settingEdgeTabPosition.value = pos;
-    }
-    if (settingEdgeTabSize) {
-      settingEdgeTabSize.value = state.edgeTabSize || 'standard';
-    }
-    if (settingEdgeTabLocked) {
-      settingEdgeTabLocked.checked = !!state.edgeTabLocked;
-    }
-
-    edgeSpotButtons.forEach((btn) => {
-      btn.classList.toggle('active', btn.dataset.pos === pos);
-    });
-
-    if (edgeTabMiniMonitor) {
-      edgeTabMiniMonitor.style.setProperty('--mini-offset', `${pct}%`);
-    }
-
-    if (edgeMiniCaption) {
-      const base = EDGE_MINI_CAPTIONS[pos] || pos;
-      edgeMiniCaption.textContent = corner ? `${base}\n(Dreieck)` : `${base} · ${pct} %`;
-      edgeMiniCaption.style.whiteSpace = 'pre-line';
-    }
-
-    if (edgeTabOffsetWrap) {
-      edgeTabOffsetWrap.style.display = corner ? 'none' : 'flex';
-    }
-    if (edgeTabCornerHint) {
-      edgeTabCornerHint.style.display = corner ? 'block' : 'none';
-    }
-    if (!corner) {
-      const isHorizontal = pos === 'top' || pos === 'bottom';
-      if (edgeTabOffsetAxisLabel) {
-        edgeTabOffsetAxisLabel.textContent = isHorizontal
-          ? 'Position am Rand (Horizontal)'
-          : 'Position am Rand (Vertikal)';
-      }
-      if (edgeTabOffsetValue) {
-        edgeTabOffsetValue.textContent = `${pct} %`;
-      }
-      if (settingEdgeTabOffset && document.activeElement !== settingEdgeTabOffset) {
-        settingEdgeTabOffset.value = String(pct);
-      }
-    }
-
-    if (edgeTabDisplayWrap && settingEdgeTabDisplay) {
-      if (Array.isArray(state.displays) && state.displays.length > 1) {
-        edgeTabDisplayWrap.style.display = 'flex';
-        settingEdgeTabDisplay.innerHTML = '';
-        state.displays.forEach((d) => {
-          const opt = document.createElement('option');
-          opt.value = d.isPrimary ? '' : d.id;
-          opt.textContent = `🖥️ ${d.label}`;
-          const isSelected = d.isPrimary
-            ? !state.edgeTabDisplayId || state.edgeTabDisplayId === d.id
-            : state.edgeTabDisplayId === d.id;
-          if (isSelected) opt.selected = true;
-          settingEdgeTabDisplay.appendChild(opt);
-        });
-      } else {
-        edgeTabDisplayWrap.style.display = 'none';
-      }
-    }
-  }
-
   // Settings Modal
   function openSettingsModal() {
     closeContextMenu();
@@ -1845,8 +1707,6 @@
     if (settingDimBackground) settingDimBackground.checked = state.dimBackground;
     if (settingRestoreClipboard) settingRestoreClipboard.checked = state.restoreClipboard;
     if (settingDoubleTapCtrl) settingDoubleTapCtrl.checked = state.doubleTapCtrlEnabled;
-    if (settingEdgeTab) settingEdgeTab.checked = state.edgeTabEnabled;
-    renderEdgeTabSettingsUI();
     updateHotstringUI();
     renderActiveHotkeys();
     updateSecurityButtonsUI();
@@ -1961,100 +1821,6 @@
   if (settingDoubleTapCtrl) {
     settingDoubleTapCtrl.addEventListener('change', (e) => {
       sendIPC('setDoubleTapCtrlEnabled', { enabled: e.target.checked });
-    });
-  }
-
-  if (settingEdgeTab) {
-    settingEdgeTab.addEventListener('change', (e) => {
-      state.edgeTabEnabled = e.target.checked;
-      renderEdgeTabSettingsUI();
-      sendIPC('setEdgeTabEnabled', { enabled: e.target.checked });
-    });
-  }
-
-  edgeSpotButtons.forEach((btn) => {
-    btn.addEventListener('click', (e) => {
-      const nextPos = btn.dataset.pos;
-      if (!nextPos) return;
-
-      const wasSameEdge = !isCornerEdgeTabPos(nextPos) && state.edgeTabPosition === nextPos;
-      if (wasSameEdge) {
-        const rect = btn.getBoundingClientRect();
-        let ratio = 0.5;
-        if (nextPos === 'top' || nextPos === 'bottom') {
-          ratio = rect.width > 0 ? (e.clientX - rect.left) / rect.width : 0.5;
-        } else {
-          ratio = rect.height > 0 ? (e.clientY - rect.top) / rect.height : 0.5;
-        }
-        const pct = Math.max(5, Math.min(95, Math.round(5 + Math.max(0, Math.min(1, ratio)) * 90)));
-        state.edgeTabOffsetPercent = pct;
-        if (settingEdgeTabOffset) settingEdgeTabOffset.value = String(pct);
-        renderEdgeTabSettingsUI();
-        sendIPC('setEdgeTabOffsetPercent', { offsetPercent: pct });
-        return;
-      }
-
-      state.edgeTabPosition = nextPos;
-      renderEdgeTabSettingsUI();
-      sendIPC('setEdgeTabPosition', { position: nextPos });
-    });
-  });
-
-  if (settingEdgeTabPosition) {
-    settingEdgeTabPosition.addEventListener('change', (e) => {
-      state.edgeTabPosition = e.target.value;
-      renderEdgeTabSettingsUI();
-      sendIPC('setEdgeTabPosition', { position: state.edgeTabPosition });
-    });
-  }
-
-  if (settingEdgeTabOffset) {
-    let offsetDebounce = null;
-    settingEdgeTabOffset.addEventListener('input', (e) => {
-      const pct = Math.max(5, Math.min(95, parseInt(e.target.value, 10) || 42));
-      state.edgeTabOffsetPercent = pct;
-      if (edgeTabOffsetValue) edgeTabOffsetValue.textContent = `${pct} %`;
-      if (edgeTabMiniMonitor) edgeTabMiniMonitor.style.setProperty('--mini-offset', `${pct}%`);
-      if (edgeMiniCaption && !isCornerEdgeTabPos(state.edgeTabPosition)) {
-        const base = EDGE_MINI_CAPTIONS[state.edgeTabPosition] || state.edgeTabPosition;
-        edgeMiniCaption.textContent = `${base} · ${pct} %`;
-      }
-      if (offsetDebounce) clearTimeout(offsetDebounce);
-      offsetDebounce = setTimeout(() => {
-        sendIPC('setEdgeTabOffsetPercent', { offsetPercent: pct });
-      }, 60);
-    });
-    settingEdgeTabOffset.addEventListener('change', (e) => {
-      if (offsetDebounce) {
-        clearTimeout(offsetDebounce);
-        offsetDebounce = null;
-      }
-      const pct = Math.max(5, Math.min(95, parseInt(e.target.value, 10) || 42));
-      state.edgeTabOffsetPercent = pct;
-      sendIPC('setEdgeTabOffsetPercent', { offsetPercent: pct });
-    });
-  }
-
-  if (settingEdgeTabSize) {
-    settingEdgeTabSize.addEventListener('change', (e) => {
-      state.edgeTabSize = e.target.value;
-      renderEdgeTabSettingsUI();
-      sendIPC('setEdgeTabSize', { size: state.edgeTabSize });
-    });
-  }
-
-  if (settingEdgeTabLocked) {
-    settingEdgeTabLocked.addEventListener('change', (e) => {
-      state.edgeTabLocked = e.target.checked;
-      renderEdgeTabSettingsUI();
-      sendIPC('setEdgeTabLocked', { locked: state.edgeTabLocked });
-    });
-  }
-
-  if (settingEdgeTabDisplay) {
-    settingEdgeTabDisplay.addEventListener('change', (e) => {
-      state.edgeTabDisplayId = e.target.value;
-      sendIPC('setEdgeTabDisplayId', { displayId: state.edgeTabDisplayId });
     });
   }
 
@@ -2563,7 +2329,6 @@
     syncBodyClasses();
     updateLayoutUI();
     updatePinUI();
-    renderEdgeTabSettingsUI();
     renderCategories();
     filterAndRender();
     sendIPC('ready');

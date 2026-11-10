@@ -1,12 +1,11 @@
 /**
- * SatzTresor v1.5.4 — Main Process
+ * SatzTresor v1.5.5 — Main Process
  * Supports:
  * - Centered Spotlight Mode (Apple-inspired floating palette with smooth blurred & dimmed desktop backdrop)
  * - Automatic Background Updates via GitHub Releases & NSIS Delta Updates (electron-updater)
  * - Triggers:
  *   1. Double-Tap Ctrl (2x quick Ctrl tap — zero text interference, zero conflicts)
- *   2. Draggable Edge-Tab Handle at screen edge (mouse-only 1-click access without stealing focus)
- *   3. Freely recordable Global Hotkeys + System Tray
+ *   2. Freely recordable Global Hotkeys + 1-Click System Tray
  * - Global Hotstring Engine: Optional real-time text expansion (e.g. ;;mfg) across Windows apps
  * - Features: Pinning, Multi-Monitor DPI-aware centering, Favorites, Duplication, Date/Time/Variable templates,
  *   Silent Windows Autostart (--hidden), Clipboard protection & restoration, AES-256 encryption (lock & password change),
@@ -35,13 +34,11 @@ const { SatzTresorUpdater } = require('./updater');
 
 const APP_ID = 'de.satztresor.app';
 const APP_NAME = 'SatzTresor';
-const APP_VERSION = '1.5.4';
-const EDGE_TAB_CORNER_SNAP_PX = 56;
-const EDGE_TAB_EDGE_MARGIN_PX = 16;
-const CENTER_WIDTH_STANDARD = 780;
-const CENTER_HEIGHT_STANDARD = 560;
-const CENTER_WIDTH_COMPACT = 640;
-const CENTER_HEIGHT_COMPACT = 460;
+const APP_VERSION = '1.5.5';
+const CENTER_WIDTH_STANDARD = 1120;
+const CENTER_HEIGHT_STANDARD = 780;
+const CENTER_WIDTH_COMPACT = 580;
+const CENTER_HEIGHT_COMPACT = 380;
 const CLOSE_ANIMATION_MS = 195;
 const SHOW_PREPARE_TIMEOUT_MS = 65;
 
@@ -49,26 +46,9 @@ if (process.platform === 'win32' && typeof app.setAppUserModelId === 'function')
   app.setAppUserModelId(APP_ID);
 }
 
-const EDGE_TAB_POSITION_LABELS = {
-  'top-left': '◤ Ecke oben links (Dreieck)',
-  'top-right': '◥ Ecke oben rechts (Dreieck)',
-  'bottom-left': '◣ Ecke unten links (Dreieck)',
-  'bottom-right': '◢ Ecke unten rechts (Dreieck)',
-  left: '◀ Linker Bildschirmrand',
-  right: '▶ Rechter Bildschirmrand',
-  top: '▲ Oberer Bildschirmrand',
-  bottom: '▼ Unterer Bildschirmrand',
-};
-
 let mainWindow = null;
-let edgeTabWindow = null;
 let lastMainIgnoreMouse = false;
 let currentMainAlwaysOnTopLevel = '';
-let lastEdgeTabIgnoreMouse = null;
-let lastSentEdgeTabVisualKey = '';
-let lastAppliedEdgeTabPhysKey = '';
-let isDraggingEdgeTab = false;
-let liveDragEdgeTabState = null;
 let tray = null;
 let lastTrayClickAt = 0;
 let currentTrayMenu = null;
@@ -286,12 +266,8 @@ function getMainWindowHwnd() {
   return getWindowHwnd(mainWindow);
 }
 
-function getEdgeTabHwnd() {
-  return getWindowHwnd(edgeTabWindow);
-}
-
 function getOwnWindowHwnds() {
-  return [getMainWindowHwnd(), getEdgeTabHwnd()].filter(Boolean);
+  return [getMainWindowHwnd()].filter(Boolean);
 }
 
 function setWindowBoundsSafe(win, bounds) {
@@ -329,8 +305,8 @@ function setWindowBoundsSafe(win, bounds) {
 
 function getCenterDimensions(bounds) {
   const isCompact = storage.getCenterCompact();
-  const maxW = Math.max(360, bounds.width - 48);
-  const maxH = Math.max(320, bounds.height - 48);
+  const maxW = Math.max(400, bounds.width - 56);
+  const maxH = Math.max(320, bounds.height - 64);
   const width = Math.min(isCompact ? CENTER_WIDTH_COMPACT : CENTER_WIDTH_STANDARD, maxW);
   const height = Math.min(isCompact ? CENTER_HEIGHT_COMPACT : CENTER_HEIGHT_STANDARD, maxH);
   return { width, height };
@@ -512,382 +488,6 @@ function syncWindowGeometry(triggerSource = 'auto', existingCtx = null) {
 }
 
 // ============================================================================
-// Edge-Tab & Corner-Triangle Handle Window (All 4 Edges + All 4 Corners)
-// ============================================================================
-function isCornerEdgeTabPosition(pos) {
-  return (
-    pos === 'top-left' ||
-    pos === 'top-right' ||
-    pos === 'bottom-left' ||
-    pos === 'bottom-right'
-  );
-}
-
-function getEdgeTabDimensions(position, size = 'standard') {
-  if (isCornerEdgeTabPosition(position)) {
-    if (size === 'compact') return { width: 28, height: 28 };
-    if (size === 'large') return { width: 48, height: 48 };
-    return { width: 36, height: 36 };
-  }
-
-  const isHorizontal = position === 'top' || position === 'bottom';
-  if (size === 'compact') {
-    return isHorizontal ? { width: 56, height: 20 } : { width: 20, height: 56 };
-  }
-  if (size === 'large') {
-    return isHorizontal ? { width: 92, height: 28 } : { width: 28, height: 92 };
-  }
-  return isHorizontal ? { width: 72, height: 24 } : { width: 24, height: 72 };
-}
-
-function getDisplaysSummary() {
-  const primary = screen.getPrimaryDisplay();
-  return screen.getAllDisplays().map((d, idx) => {
-    const isPrimary = d.id === primary.id;
-    const res = `${d.bounds.width}×${d.bounds.height}`;
-    return {
-      id: String(d.id),
-      isPrimary,
-      label: isPrimary ? `Hauptbildschirm (${res})` : `Monitor ${idx + 1} (${res})`,
-    };
-  });
-}
-
-function getEdgeTabTargetDisplay(customDisplayId = null) {
-  const primary = screen.getPrimaryDisplay();
-  const wantedId =
-    customDisplayId !== null && customDisplayId !== undefined
-      ? String(customDisplayId).trim()
-      : storage.getEdgeTabDisplayId();
-
-  if (wantedId) {
-    const match = screen.getAllDisplays().find((d) => String(d.id) === wantedId);
-    if (match) return match;
-  }
-  return primary;
-}
-
-function getEdgeTabBounds(override = null) {
-  const position = (override && override.position) || storage.getEdgeTabPosition();
-  const size = (override && override.size) || storage.getEdgeTabSize();
-  const offsetPercent =
-    override && typeof override.offsetPercent === 'number'
-      ? override.offsetPercent
-      : storage.getEdgeTabOffsetPercent();
-  const display = getEdgeTabTargetDisplay(override ? override.displayId : null);
-  const wa = display.workArea;
-  const { width, height } = getEdgeTabDimensions(position, size);
-
-  const clampedPct = Math.max(5, Math.min(95, offsetPercent));
-  const t = (clampedPct - 5) / 90;
-
-  let x = wa.x;
-  let y = wa.y;
-
-  switch (position) {
-    case 'top-left':
-      x = wa.x;
-      y = wa.y;
-      break;
-    case 'top-right':
-      x = wa.x + wa.width - width;
-      y = wa.y;
-      break;
-    case 'bottom-left':
-      x = wa.x;
-      y = wa.y + wa.height - height;
-      break;
-    case 'bottom-right':
-      x = wa.x + wa.width - width;
-      y = wa.y + wa.height - height;
-      break;
-    case 'top': {
-      const minX = wa.x + EDGE_TAB_EDGE_MARGIN_PX;
-      const maxX = Math.max(minX, wa.x + wa.width - width - EDGE_TAB_EDGE_MARGIN_PX);
-      x = Math.round(minX + (maxX - minX) * t);
-      y = wa.y;
-      break;
-    }
-    case 'bottom': {
-      const minX = wa.x + EDGE_TAB_EDGE_MARGIN_PX;
-      const maxX = Math.max(minX, wa.x + wa.width - width - EDGE_TAB_EDGE_MARGIN_PX);
-      x = Math.round(minX + (maxX - minX) * t);
-      y = wa.y + wa.height - height;
-      break;
-    }
-    case 'right': {
-      const minY = wa.y + EDGE_TAB_EDGE_MARGIN_PX;
-      const maxY = Math.max(minY, wa.y + wa.height - height - EDGE_TAB_EDGE_MARGIN_PX);
-      x = wa.x + wa.width - width;
-      y = Math.round(minY + (maxY - minY) * t);
-      break;
-    }
-    case 'left':
-    default: {
-      const minY = wa.y + EDGE_TAB_EDGE_MARGIN_PX;
-      const maxY = Math.max(minY, wa.y + wa.height - height - EDGE_TAB_EDGE_MARGIN_PX);
-      x = wa.x;
-      y = Math.round(minY + (maxY - minY) * t);
-      break;
-    }
-  }
-
-  return {
-    x,
-    y,
-    width,
-    height,
-    workArea: wa,
-    displayId: String(display.id),
-    isPrimaryDisplay: display.id === screen.getPrimaryDisplay().id,
-    position,
-    offsetPercent: clampedPct,
-    size,
-  };
-}
-
-function computeEdgeTabSnapFromCursor(fallbackData = null) {
-  let cursorPt = null;
-  try {
-    cursorPt = screen.getCursorScreenPoint();
-  } catch (e) {}
-
-  if (
-    !cursorPt &&
-    fallbackData &&
-    typeof fallbackData.screenX === 'number' &&
-    typeof fallbackData.screenY === 'number'
-  ) {
-    cursorPt = { x: fallbackData.screenX, y: fallbackData.screenY };
-  }
-  if (!cursorPt) {
-    return null;
-  }
-
-  const primary = screen.getPrimaryDisplay();
-  const display = screen.getDisplayNearestPoint(cursorPt) || primary;
-  const wa = display.workArea;
-  const size = storage.getEdgeTabSize();
-
-  const cx = Math.max(wa.x, Math.min(wa.x + wa.width, cursorPt.x));
-  const cy = Math.max(wa.y, Math.min(wa.y + wa.height, cursorPt.y));
-
-  const dLeft = cx - wa.x;
-  const dRight = wa.x + wa.width - cx;
-  const dTop = cy - wa.y;
-  const dBottom = wa.y + wa.height - cy;
-
-  let position = 'left';
-  let offsetPercent = storage.getEdgeTabOffsetPercent();
-
-  if (dLeft <= EDGE_TAB_CORNER_SNAP_PX && dTop <= EDGE_TAB_CORNER_SNAP_PX) {
-    position = 'top-left';
-  } else if (dRight <= EDGE_TAB_CORNER_SNAP_PX && dTop <= EDGE_TAB_CORNER_SNAP_PX) {
-    position = 'top-right';
-  } else if (dLeft <= EDGE_TAB_CORNER_SNAP_PX && dBottom <= EDGE_TAB_CORNER_SNAP_PX) {
-    position = 'bottom-left';
-  } else if (dRight <= EDGE_TAB_CORNER_SNAP_PX && dBottom <= EDGE_TAB_CORNER_SNAP_PX) {
-    position = 'bottom-right';
-  } else {
-    const minDist = Math.min(dLeft, dRight, dTop, dBottom);
-    if (minDist === dTop) {
-      position = 'top';
-    } else if (minDist === dBottom) {
-      position = 'bottom';
-    } else if (minDist === dRight) {
-      position = 'right';
-    } else {
-      position = 'left';
-    }
-
-    const { width, height } = getEdgeTabDimensions(position, size);
-    if (position === 'top' || position === 'bottom') {
-      const minX = wa.x + EDGE_TAB_EDGE_MARGIN_PX;
-      const maxX = Math.max(minX, wa.x + wa.width - width - EDGE_TAB_EDGE_MARGIN_PX);
-      const targetX = Math.max(minX, Math.min(maxX, cx - width / 2));
-      const t = maxX > minX ? (targetX - minX) / (maxX - minX) : 0.5;
-      offsetPercent = Math.round((5 + t * 90) * 10) / 10;
-    } else {
-      const minY = wa.y + EDGE_TAB_EDGE_MARGIN_PX;
-      const maxY = Math.max(minY, wa.y + wa.height - height - EDGE_TAB_EDGE_MARGIN_PX);
-      const targetY = Math.max(minY, Math.min(maxY, cy - height / 2));
-      const t = maxY > minY ? (targetY - minY) / (maxY - minY) : 0.5;
-      offsetPercent = Math.round((5 + t * 90) * 10) / 10;
-    }
-  }
-
-  const displayId = display.id === primary.id ? '' : String(display.id);
-  const bounds = getEdgeTabBounds({ position, offsetPercent, size, displayId });
-
-  return {
-    position,
-    offsetPercent,
-    displayId,
-    bounds,
-  };
-}
-
-function setEdgeTabIgnoreMouse(ignore) {
-  if (!edgeTabWindow || edgeTabWindow.isDestroyed()) return;
-  const next = Boolean(ignore);
-  if (lastEdgeTabIgnoreMouse === next) return;
-  lastEdgeTabIgnoreMouse = next;
-  try {
-    if (next) {
-      edgeTabWindow.setIgnoreMouseEvents(true, { forward: true });
-    } else {
-      edgeTabWindow.setIgnoreMouseEvents(false);
-    }
-  } catch (e) {}
-}
-
-function sendVisualStateToEdgeTab(override = null, force = false) {
-  if (!edgeTabWindow || edgeTabWindow.isDestroyed()) return;
-  if (!edgeTabWindow.webContents || edgeTabWindow.webContents.isLoading()) return;
-
-  const position = (override && override.position) || storage.getEdgeTabPosition();
-  const size = (override && override.size) || storage.getEdgeTabSize();
-  const locked =
-    override && typeof override.locked === 'boolean'
-      ? override.locked
-      : storage.getEdgeTabLocked();
-  const theme = storage.getTheme();
-
-  const key = `${position}|${size}|${locked ? '1' : '0'}|${theme}`;
-  if (!force && key === lastSentEdgeTabVisualKey) return;
-  lastSentEdgeTabVisualKey = key;
-
-  edgeTabWindow.webContents.send('satztresor-msg', {
-    type: 'edgeTabState',
-    position,
-    side: position === 'right' ? 'right' : 'left',
-    size,
-    locked,
-    theme,
-  });
-}
-
-function setEdgeTabBoundsExact(dipBounds, force = false) {
-  if (!edgeTabWindow || edgeTabWindow.isDestroyed() || !dipBounds) return;
-  const targetDip = {
-    x: Math.round(dipBounds.x),
-    y: Math.round(dipBounds.y),
-    width: Math.max(1, Math.round(dipBounds.width)),
-    height: Math.max(1, Math.round(dipBounds.height)),
-  };
-
-  if (process.platform === 'win32') {
-    let phys = targetDip;
-    try {
-      if (typeof screen.dipToScreenRect === 'function') {
-        phys = screen.dipToScreenRect(edgeTabWindow, targetDip);
-      }
-    } catch (e) {}
-
-    const key = `${phys.x}|${phys.y}|${phys.width}|${phys.height}`;
-    if (!force && key === lastAppliedEdgeTabPhysKey) return;
-    lastAppliedEdgeTabPhysKey = key;
-    win32.applyEdgeTabBounds(getEdgeTabHwnd(), phys);
-    return;
-  }
-
-  setWindowBoundsSafe(edgeTabWindow, targetDip);
-}
-
-function createEdgeTabWindow() {
-  const b = getEdgeTabBounds();
-
-  edgeTabWindow = new BrowserWindow({
-    x: b.x,
-    y: b.y,
-    width: b.width,
-    height: b.height,
-    minWidth: 1,
-    minHeight: 1,
-    title: '',
-    frame: false,
-    thickFrame: false,
-    transparent: true,
-    alwaysOnTop: true,
-    skipTaskbar: true,
-    resizable: false,
-    movable: false,
-    minimizable: false,
-    maximizable: false,
-    fullscreenable: false,
-    focusable: false,
-    hasShadow: false,
-    show: false,
-    backgroundColor: '#00000000',
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-    },
-  });
-
-  if (process.platform === 'win32') {
-    win32.installFramelessWindowGuard(getEdgeTabHwnd(), {
-      noActivate: true,
-      onSessionEnd: handleWindowsSessionEnd,
-    });
-  }
-
-  edgeTabWindow.setAlwaysOnTop(true, 'screen-saver');
-  setEdgeTabBoundsExact(b, true);
-  edgeTabWindow.loadFile(path.join(__dirname, '..', 'ui', 'edge-tab.html'), {
-    query: {
-      pos: b.position,
-      size: b.size,
-      locked: storage.getEdgeTabLocked() ? '1' : '0',
-      theme: storage.getTheme(),
-    },
-  });
-
-  edgeTabWindow.webContents.on('did-finish-load', () => {
-    lastSentEdgeTabVisualKey = '';
-    syncEdgeTabWindow();
-  });
-
-  edgeTabWindow.on('close', (e) => {
-    if (!isQuitting) {
-      e.preventDefault();
-      edgeTabWindow.hide();
-    }
-  });
-}
-
-function syncEdgeTabWindow() {
-  if (!edgeTabWindow || edgeTabWindow.isDestroyed()) return;
-
-  const activeOverride = isDraggingEdgeTab ? liveDragEdgeTabState : null;
-  sendVisualStateToEdgeTab(activeOverride, false);
-
-  const shouldShow =
-    !isQuitting &&
-    storage.getEdgeTabEnabled() &&
-    !isWindowEffectivelyVisible();
-
-  if (shouldShow) {
-    const b = getEdgeTabBounds(activeOverride);
-    setEdgeTabBoundsExact(b, !edgeTabWindow.isVisible());
-    if (isDraggingEdgeTab || !isCornerEdgeTabPosition(b.position)) {
-      setEdgeTabIgnoreMouse(false);
-    } else if (lastEdgeTabIgnoreMouse === null) {
-      setEdgeTabIgnoreMouse(true);
-    }
-    if (!edgeTabWindow.isVisible()) {
-      edgeTabWindow.showInactive();
-      setEdgeTabBoundsExact(b, true);
-    }
-  } else if (edgeTabWindow.isVisible()) {
-    lastEdgeTabIgnoreMouse = null;
-    lastAppliedEdgeTabPhysKey = '';
-    edgeTabWindow.hide();
-  }
-}
-
-// ============================================================================
 // Main SatzTresor Palette Window
 // ============================================================================
 function createSatzTresorWindow() {
@@ -961,13 +561,8 @@ function createSatzTresorWindow() {
     }
   });
 
-  mainWindow.on('show', () => {
-    syncEdgeTabWindow();
-  });
-
   mainWindow.on('hide', () => {
     win32.restoreWindowsFromDock();
-    syncEdgeTabWindow();
   });
 
   mainWindow.on('close', (e) => {
@@ -988,7 +583,6 @@ function applyLayout() {
 
   win32.restoreWindowsFromDock();
   syncWindowGeometry();
-  syncEdgeTabWindow();
   sendDataToRenderer();
   updateTrayMenu();
 }
@@ -1108,13 +702,6 @@ function sendDataToRenderer(options = {}) {
     isLocked: storage.isLocked,
     theme: storage.getTheme(),
     doubleTapCtrlEnabled: storage.getDoubleTapCtrlEnabled(),
-    edgeTabEnabled: storage.getEdgeTabEnabled(),
-    edgeTabPosition: storage.getEdgeTabPosition(),
-    edgeTabOffsetPercent: storage.getEdgeTabOffsetPercent(),
-    edgeTabSize: storage.getEdgeTabSize(),
-    edgeTabLocked: storage.getEdgeTabLocked(),
-    edgeTabDisplayId: storage.getEdgeTabDisplayId(),
-    displays: getDisplaysSummary(),
     hotstringsEnabled: storage.getHotstringsEnabled(),
     hotstringPrefix: storage.getHotstringPrefix(),
     restoreClipboard: storage.getRestoreClipboard(),
@@ -1186,8 +773,6 @@ function finalizePendingShow(seq) {
   } else if (storage.isLocked) {
     mainWindow.webContents.send('satztresor-msg', { type: 'openUnlock' });
   }
-
-  syncEdgeTabWindow();
 }
 
 function showWindow(options = {}) {
@@ -1221,10 +806,6 @@ function showWindow(options = {}) {
   if (isPinned) {
     currentBackdropSnapshot = null;
   } else if (wasHidden) {
-    if (edgeTabWindow && !edgeTabWindow.isDestroyed() && edgeTabWindow.isVisible()) {
-      lastEdgeTabIgnoreMouse = null;
-      edgeTabWindow.hide();
-    }
     currentBackdropSnapshot = win32.captureDisplayBackdrop(targetCtx.physicalBounds);
   }
 
@@ -1259,7 +840,6 @@ function showWindow(options = {}) {
   if (waitAck) {
     isPendingShow = true;
     pendingShowContext = { seq, ctx, isPinned, postShowMessage };
-    syncEdgeTabWindow();
     pendingShowFallbackTimer = setTimeout(() => {
       finalizePendingShow(seq);
     }, SHOW_PREPARE_TIMEOUT_MS);
@@ -1277,8 +857,6 @@ function showWindow(options = {}) {
   } else if (storage.isLocked) {
     mainWindow.webContents.send('satztresor-msg', { type: 'openUnlock' });
   }
-
-  syncEdgeTabWindow();
 }
 
 function hideWindowSmoothly({ restoreFocus = false, immediate = false } = {}) {
@@ -1293,7 +871,6 @@ function hideWindowSmoothly({ restoreFocus = false, immediate = false } = {}) {
       mainWindow.webContents.send('satztresor-msg', { type: 'resetHiddenState' });
     }
     win32.restoreWindowsFromDock();
-    syncEdgeTabWindow();
     return;
   }
 
@@ -1309,7 +886,6 @@ function hideWindowSmoothly({ restoreFocus = false, immediate = false } = {}) {
       const targetHwnd = win32.getLastForegroundWindow();
       if (targetHwnd) win32.restoreForegroundWindow(targetHwnd);
     }
-    syncEdgeTabWindow();
     return;
   }
 
@@ -1326,7 +902,6 @@ function hideWindowSmoothly({ restoreFocus = false, immediate = false } = {}) {
   setMainIgnoreMouse(true);
 
   mainWindow.webContents.send('satztresor-msg', { type: 'animateOut' });
-  syncEdgeTabWindow();
 
   if (restoreFocus) {
     const targetHwnd = win32.getLastForegroundWindow();
@@ -1349,7 +924,6 @@ function hideWindowSmoothly({ restoreFocus = false, immediate = false } = {}) {
       } catch (e) {}
     }
     win32.restoreWindowsFromDock();
-    syncEdgeTabWindow();
   }, CLOSE_ANIMATION_MS);
 }
 
@@ -1601,152 +1175,9 @@ async function exportSnippetsWithFormat(format) {
   }
 }
 
-function buildEdgeTabSubmenuTemplate() {
-  const edgeTabOn = storage.getEdgeTabEnabled();
-  const edgeTabPos = storage.getEdgeTabPosition();
-  const edgeTabSize = storage.getEdgeTabSize();
-  const edgeTabLocked = storage.getEdgeTabLocked();
-  const displays = getDisplaysSummary();
-  const currentDisplayId = storage.getEdgeTabDisplayId();
-
-  const applyPos = (pos) => {
-    storage.setEdgeTabPosition(pos);
-    if (!storage.getEdgeTabEnabled()) {
-      storage.setEdgeTabEnabled(true);
-    }
-    syncEdgeTabWindow();
-    sendDataToRenderer();
-    updateTrayMenu();
-  };
-
-  const applySize = (sz) => {
-    storage.setEdgeTabSize(sz);
-    syncEdgeTabWindow();
-    sendDataToRenderer();
-    updateTrayMenu();
-  };
-
-  const items = [
-    {
-      label: 'Lasche anzeigen (Aktiviert)',
-      type: 'checkbox',
-      checked: edgeTabOn,
-      click: (item) => {
-        storage.setEdgeTabEnabled(item.checked);
-        syncEdgeTabWindow();
-        sendDataToRenderer();
-        updateTrayMenu();
-      },
-    },
-    {
-      label: 'Position fixieren (Verschieben sperren)',
-      type: 'checkbox',
-      checked: edgeTabLocked,
-      click: (item) => {
-        storage.setEdgeTabLocked(item.checked);
-        syncEdgeTabWindow();
-        sendDataToRenderer();
-        updateTrayMenu();
-      },
-    },
-    { type: 'separator' },
-    {
-      label: '◤ Ecke oben links (Dreieck)',
-      type: 'radio',
-      checked: edgeTabPos === 'top-left',
-      click: () => applyPos('top-left'),
-    },
-    {
-      label: '◥ Ecke oben rechts (Dreieck)',
-      type: 'radio',
-      checked: edgeTabPos === 'top-right',
-      click: () => applyPos('top-right'),
-    },
-    {
-      label: '◣ Ecke unten links (Dreieck)',
-      type: 'radio',
-      checked: edgeTabPos === 'bottom-left',
-      click: () => applyPos('bottom-left'),
-    },
-    {
-      label: '◢ Ecke unten rechts (Dreieck)',
-      type: 'radio',
-      checked: edgeTabPos === 'bottom-right',
-      click: () => applyPos('bottom-right'),
-    },
-    { type: 'separator' },
-    {
-      label: '◀ Linker Bildschirmrand',
-      type: 'radio',
-      checked: edgeTabPos === 'left',
-      click: () => applyPos('left'),
-    },
-    {
-      label: '▶ Rechter Bildschirmrand',
-      type: 'radio',
-      checked: edgeTabPos === 'right',
-      click: () => applyPos('right'),
-    },
-    {
-      label: '▲ Oberer Bildschirmrand',
-      type: 'radio',
-      checked: edgeTabPos === 'top',
-      click: () => applyPos('top'),
-    },
-    {
-      label: '▼ Unterer Bildschirmrand',
-      type: 'radio',
-      checked: edgeTabPos === 'bottom',
-      click: () => applyPos('bottom'),
-    },
-    { type: 'separator' },
-    {
-      label: 'Größe: Kompakt',
-      type: 'radio',
-      checked: edgeTabSize === 'compact',
-      click: () => applySize('compact'),
-    },
-    {
-      label: 'Größe: Standard',
-      type: 'radio',
-      checked: edgeTabSize === 'standard',
-      click: () => applySize('standard'),
-    },
-    {
-      label: 'Größe: Groß',
-      type: 'radio',
-      checked: edgeTabSize === 'large',
-      click: () => applySize('large'),
-    },
-  ];
-
-  if (displays.length > 1) {
-    items.push({ type: 'separator' });
-    for (const d of displays) {
-      const checked = d.isPrimary
-        ? !currentDisplayId || currentDisplayId === d.id
-        : currentDisplayId === d.id;
-      items.push({
-        label: `Bildschirm: ${d.label}`,
-        type: 'radio',
-        checked,
-        click: () => {
-          storage.setEdgeTabDisplayId(d.isPrimary ? '' : d.id);
-          syncEdgeTabWindow();
-          sendDataToRenderer();
-          updateTrayMenu();
-        },
-      });
-    }
-  }
-
-  return items;
-}
-
 function updateTrayMenu() {
   const isAutostart = getAutostartEnabled();
   const doubleTapOn = storage.getDoubleTapCtrlEnabled();
-  const edgeTabOn = storage.getEdgeTabEnabled();
   const hotstringsOn = storage.getHotstringsEnabled();
   const activeHks = storage.getActiveHotkeys();
 
@@ -1771,10 +1202,6 @@ function updateTrayMenu() {
         sendDataToRenderer();
         updateTrayMenu();
       },
-    },
-    {
-      label: `Bildschirmrand-Lasche (${edgeTabOn ? 'Aktiv' : 'Aus'})`,
-      submenu: buildEdgeTabSubmenuTemplate(),
     },
     {
       label: 'Automatisches Ersetzen (Hotstrings)',
@@ -1837,7 +1264,6 @@ function updateTrayMenu() {
             storage.setTheme('dark');
             syncSystemTheme();
             syncNativeBackdrop();
-            syncEdgeTabWindow();
             sendDataToRenderer();
             updateTrayMenu();
           },
@@ -1850,7 +1276,6 @@ function updateTrayMenu() {
             storage.setTheme('light');
             syncSystemTheme();
             syncNativeBackdrop();
-            syncEdgeTabWindow();
             sendDataToRenderer();
             updateTrayMenu();
           },
@@ -1973,7 +1398,7 @@ function updateTrayMenu() {
             title: `Über ${APP_NAME} v${APP_VERSION}`,
             message:
               `${APP_NAME} v${APP_VERSION} — Moderner Satzbaustein-Manager\n\n` +
-              '• Aufruf: 2× kurz Strg antippen, Bildschirmrand-Lasche anklicken oder eigenes Tastenkürzel\n' +
+              '• Aufruf: 2× kurz Strg antippen, System-Tray-Icon anklicken oder eigenes Tastenkürzel\n' +
               '• Automatisches Ersetzen: Kürzel wie ;;mfg direkt in jedem Programm tippen\n' +
               '• Erscheinungsbild: Zentriertes Spotlight-Fenster mit weichem Milchglas-Hintergrund\n' +
               '• Schnelles Einfügen: [Alt] + [1..9] oder Eingabetaste\n' +
@@ -2060,86 +1485,6 @@ ipcMain.on('satztresor-msg', (event, data) => {
       break;
     }
 
-    // Edge-Tab & Corner-Triangle Window actions
-    case 'edgeTabReady':
-      lastSentEdgeTabVisualKey = '';
-      syncEdgeTabWindow();
-      break;
-
-    case 'edgeTabClick':
-      showWindow({ source: 'mouse' });
-      break;
-
-    case 'edgeTabSetIgnoreMouse': {
-      if (!isDraggingEdgeTab) {
-        const pos = storage.getEdgeTabPosition();
-        if (isCornerEdgeTabPosition(pos)) {
-          setEdgeTabIgnoreMouse(!!data.ignore);
-        } else {
-          setEdgeTabIgnoreMouse(false);
-        }
-      }
-      break;
-    }
-
-    case 'edgeTabDrag': {
-      if (storage.getEdgeTabLocked()) break;
-      if (edgeTabWindow && !edgeTabWindow.isDestroyed()) {
-        const snap = computeEdgeTabSnapFromCursor(data);
-        if (snap) {
-          isDraggingEdgeTab = true;
-          liveDragEdgeTabState = {
-            position: snap.position,
-            offsetPercent: snap.offsetPercent,
-            displayId: snap.displayId,
-            size: storage.getEdgeTabSize(),
-            locked: false,
-          };
-          setEdgeTabIgnoreMouse(false);
-          sendVisualStateToEdgeTab(liveDragEdgeTabState, false);
-          setEdgeTabBoundsExact(snap.bounds);
-        }
-      }
-      break;
-    }
-
-    case 'edgeTabDragEnd': {
-      const wasDragging = isDraggingEdgeTab;
-      const snap = !storage.getEdgeTabLocked()
-        ? computeEdgeTabSnapFromCursor(data) || liveDragEdgeTabState
-        : null;
-      isDraggingEdgeTab = false;
-      liveDragEdgeTabState = null;
-
-      if (wasDragging && snap && snap.position) {
-        const clampedPct = Math.max(
-          5,
-          Math.min(95, Math.round((Number(snap.offsetPercent) || 42) * 10) / 10)
-        );
-        storage.setSettingsBatch({
-          EdgeTabPosition: snap.position,
-          EdgeTabOffsetPercent: String(clampedPct),
-          EdgeTabYPercent: String(Math.round(clampedPct)),
-          EdgeTabDisplayId: String(snap.displayId || ''),
-        });
-        syncEdgeTabWindow();
-        markDataDirtyAndSync();
-        updateTrayMenu();
-      } else {
-        syncEdgeTabWindow();
-      }
-      break;
-    }
-
-    case 'edgeTabContextMenu': {
-      if (currentTrayMenu) {
-        const popupOpts =
-          edgeTabWindow && !edgeTabWindow.isDestroyed() ? { window: edgeTabWindow } : undefined;
-        currentTrayMenu.popup(popupOpts);
-      }
-      break;
-    }
-
     case 'showPrepared': {
       if (typeof data.seq === 'number') {
         finalizePendingShow(data.seq);
@@ -2159,7 +1504,6 @@ ipcMain.on('satztresor-msg', (event, data) => {
         registerHotkeys();
         restartKeyboardHook();
         applyThemeAndBoundsAfterUnlock();
-        syncEdgeTabWindow();
         sendDataToRenderer();
         updateTrayMenu();
         mainWindow.webContents.send('satztresor-msg', { type: 'unlockSuccess' });
@@ -2307,7 +1651,7 @@ ipcMain.on('satztresor-msg', (event, data) => {
         type: 'showToast',
         message: nextCompact
           ? `⇤ Kompaktansicht (${CENTER_WIDTH_COMPACT}×${CENTER_HEIGHT_COMPACT})`
-          : `⇥ Standardansicht (${CENTER_WIDTH_STANDARD}×${CENTER_HEIGHT_STANDARD})`,
+          : `⇥ Großansicht (${CENTER_WIDTH_STANDARD}×${CENTER_HEIGHT_STANDARD})`,
       });
       break;
     }
@@ -2335,7 +1679,6 @@ ipcMain.on('satztresor-msg', (event, data) => {
         storage.setTheme(data.theme);
         syncSystemTheme();
         syncNativeBackdrop();
-        syncEdgeTabWindow();
         sendDataToRenderer();
         updateTrayMenu();
       }
@@ -2417,86 +1760,6 @@ ipcMain.on('satztresor-msg', (event, data) => {
       mainWindow.webContents.send('satztresor-msg', {
         type: 'showToast',
         message: data.enabled ? '✓ 2× Strg Aufruf aktiviert' : '2× Strg Aufruf deaktiviert',
-      });
-      break;
-    }
-
-    case 'setEdgeTabEnabled': {
-      storage.setEdgeTabEnabled(!!data.enabled);
-      syncEdgeTabWindow();
-      sendDataToRenderer();
-      updateTrayMenu();
-      mainWindow.webContents.send('satztresor-msg', {
-        type: 'showToast',
-        message: data.enabled ? '✓ Bildschirmrand-Lasche aktiviert' : 'Bildschirmrand-Lasche ausgeblendet',
-      });
-      break;
-    }
-
-    case 'setEdgeTabPosition': {
-      if (data.position) {
-        storage.setEdgeTabPosition(data.position);
-        syncEdgeTabWindow();
-        sendDataToRenderer();
-        updateTrayMenu();
-        const label = EDGE_TAB_POSITION_LABELS[storage.getEdgeTabPosition()] || 'Position aktualisiert';
-        mainWindow.webContents.send('satztresor-msg', {
-          type: 'showToast',
-          message: `✓ ${label}`,
-        });
-      }
-      break;
-    }
-
-    case 'setEdgeTabOffsetPercent': {
-      if (typeof data.offsetPercent !== 'undefined') {
-        storage.setEdgeTabOffsetPercent(data.offsetPercent);
-        syncEdgeTabWindow();
-        sendDataToRenderer();
-      }
-      break;
-    }
-
-    case 'setEdgeTabSize': {
-      if (data.size) {
-        storage.setEdgeTabSize(data.size);
-        syncEdgeTabWindow();
-        sendDataToRenderer();
-        updateTrayMenu();
-        const sizeLabels = {
-          compact: 'Kompakt',
-          standard: 'Standard',
-          large: 'Groß',
-        };
-        mainWindow.webContents.send('satztresor-msg', {
-          type: 'showToast',
-          message: `✓ Laschen-Größe: ${sizeLabels[storage.getEdgeTabSize()] || 'Standard'}`,
-        });
-      }
-      break;
-    }
-
-    case 'setEdgeTabLocked': {
-      const locked = !!data.locked;
-      storage.setEdgeTabLocked(locked);
-      syncEdgeTabWindow();
-      sendDataToRenderer();
-      updateTrayMenu();
-      mainWindow.webContents.send('satztresor-msg', {
-        type: 'showToast',
-        message: locked ? '🔒 Laschen-Position fixiert' : '🔓 Lasche wieder frei verschiebbar',
-      });
-      break;
-    }
-
-    case 'setEdgeTabDisplayId': {
-      storage.setEdgeTabDisplayId(data.displayId || '');
-      syncEdgeTabWindow();
-      sendDataToRenderer();
-      updateTrayMenu();
-      mainWindow.webContents.send('satztresor-msg', {
-        type: 'showToast',
-        message: '✓ Bildschirm für Lasche aktualisiert',
       });
       break;
     }
@@ -2745,11 +2008,6 @@ function prepareQuitForUpdate() {
     } catch (e) {}
     tray = null;
   }
-  if (edgeTabWindow && !edgeTabWindow.isDestroyed()) {
-    try {
-      edgeTabWindow.destroy();
-    } catch (e) {}
-  }
   if (mainWindow && !mainWindow.isDestroyed()) {
     try {
       mainWindow.destroy();
@@ -2782,14 +2040,12 @@ app.whenReady().then(() => {
   });
 
   createSatzTresorWindow();
-  createEdgeTabWindow();
   setupTray();
   registerHotkeys();
   restartKeyboardHook();
   updater.startSchedule();
 
   const handleDisplayChange = () => {
-    syncEdgeTabWindow();
     updateTrayMenu();
     markDataDirtyAndSync();
     if (isWindowEffectivelyVisible()) {
@@ -2803,8 +2059,6 @@ app.whenReady().then(() => {
 
   if (!launchedHidden) {
     showWindow({ source: 'startup' });
-  } else {
-    syncEdgeTabWindow();
   }
 });
 
