@@ -1,5 +1,5 @@
 /**
- * SatzTresor v1.5.5 — Apple-Inspired Spotlight & Frosted Glass Stylesheet
+ * SatzTresor v1.5.6 — Apple-Inspired Spotlight & Frosted Glass Stylesheet
  * Supports Dark & Light mode, Fullscreen Blurred & Dimmed Focus Backdrop,
  * Centered Spotlight layout, Softwareupdate UI, Modals, and Context Menu.
  */
@@ -544,20 +544,31 @@ body.no-anim .modal-box {
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  text-align: center;
   height: 100%;
   color: var(--text-dim);
   gap: 8px;
-  padding: 40px 0;
+  padding: 36px 24px;
 }
 
 .empty-title {
   font-size: 15px;
   font-weight: 600;
-  color: var(--text-muted);
+  color: var(--text-main);
 }
 
 .empty-hint {
   font-size: 12.5px;
+  color: var(--text-muted);
+  max-width: 420px;
+  line-height: 1.45;
+}
+
+.empty-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
 }
 
 /* Bottom Status/Action Footer */
@@ -601,8 +612,11 @@ body.no-anim .modal-box {
 }
 
 .status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   font-size: 10.5px;
-  padding: 2px 8px;
+  padding: 2px 9px;
   border-radius: 9999px;
   background: var(--tag-bg);
   color: var(--text-muted);
@@ -610,6 +624,14 @@ body.no-anim .modal-box {
   font-weight: 600;
   cursor: pointer;
   transition: all 0.16s ease;
+}
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  transition: background-color 0.16s ease, box-shadow 0.16s ease;
 }
 
 .status-pill:hover {
@@ -621,6 +643,11 @@ body.no-anim .modal-box {
   background: rgba(48, 209, 88, 0.14);
   color: var(--status-green);
   border-color: rgba(48, 209, 88, 0.34);
+}
+
+.status-pill.active .status-dot {
+  background: var(--status-green);
+  box-shadow: 0 0 6px rgba(48, 209, 88, 0.65);
 }
 
 .toast-msg {
@@ -678,7 +705,7 @@ body.center-compact .footer-hints {
   gap: 8px;
 }
 
-body.center-compact .footer-hints .hint-item:last-child {
+body.center-compact .footer-hints .hint-item:nth-child(n+3) {
   display: none;
 }
 
@@ -792,12 +819,95 @@ html.light .modal-overlay {
   gap: 6px;
 }
 
+.manager-grid-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.manager-cat-fav-row {
+  grid-template-columns: 1fr auto;
+  align-items: flex-end;
+}
+
+.form-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .form-label {
   font-size: 11.5px;
   font-weight: 600;
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.03em;
+}
+
+.form-label-sub {
+  text-transform: none;
+  font-weight: 450;
+  color: var(--text-dim);
+  letter-spacing: 0;
+}
+
+.form-label-hint {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.field-live-hint {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-dim);
+}
+
+.field-live-hint.active {
+  font-family: ui-monospace, "SF Mono", SFMono-Regular, Consolas, monospace;
+  font-weight: 600;
+  color: var(--accent);
+  background: rgba(10, 132, 255, 0.13);
+  padding: 1px 6px;
+  border-radius: 5px;
+}
+
+.fav-toggle-btn {
+  height: 38px;
+  padding: 0 13px;
+  border-radius: 9px;
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 550;
+  font-family: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.fav-toggle-btn:hover {
+  color: var(--text-main);
+  border-color: var(--border-accent);
+}
+
+.fav-toggle-btn.active {
+  background: rgba(255, 214, 10, 0.13);
+  border-color: rgba(255, 214, 10, 0.42);
+  color: var(--star-active);
+}
+
+html.light .fav-toggle-btn.active {
+  background: rgba(245, 158, 11, 0.14);
+  border-color: rgba(245, 158, 11, 0.45);
+}
+
+.fav-toggle-btn.active svg {
+  fill: currentColor;
 }
 
 .form-input, .form-select, .form-textarea {
@@ -852,18 +962,20 @@ body.center-compact #editContent {
 .template-chip {
   background: var(--tag-bg);
   border: 1px solid var(--border-subtle);
-  border-radius: 6px;
-  padding: 3px 9px;
-  font-size: 11px;
-  font-family: ui-monospace, "SF Mono", SFMono-Regular, Consolas, monospace;
-  color: var(--accent);
+  border-radius: 7px;
+  padding: 4px 10px;
+  font-size: 11.5px;
+  font-weight: 550;
+  font-family: inherit;
+  color: var(--text-muted);
   cursor: pointer;
   transition: all 0.15s ease;
 }
 
 .template-chip:hover {
-  background: rgba(10, 132, 255, 0.18);
+  background: rgba(10, 132, 255, 0.16);
   border-color: var(--border-accent);
+  color: var(--accent);
 }
 
 .modal-footer {
@@ -1079,23 +1191,159 @@ body.center-compact .btn-new-snippet {
   margin: 4px 6px;
 }
 
-/* Settings Toggles & Grouped Rows */
+/* Settings Modal — Structured Card Hierarchy */
+.settings-modal-box {
+  max-width: 580px;
+}
+
+body:not(.center-compact) .settings-modal-box {
+  max-width: 620px;
+}
+
+.settings-modal-body {
+  padding: 16px 20px 18px;
+  gap: 16px;
+}
+
+.settings-section-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 .settings-section-header {
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 650;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--accent);
-  padding-bottom: 2px;
+  letter-spacing: 0.055em;
+  color: var(--text-muted);
+  padding: 0 4px;
+}
+
+.settings-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 13px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .settings-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 0;
+  padding: 11px 14px;
   border-bottom: 1px solid var(--border-subtle);
-  gap: 12px;
+  gap: 14px;
+}
+
+.settings-card > .settings-row:last-child {
+  border-bottom: none;
+}
+
+.settings-row-stackable {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 9px;
+}
+
+.settings-row-inline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  width: 100%;
+}
+
+/* Segmented Controls (Theme / Backdrop Focus) */
+.seg-control {
+  display: inline-flex;
+  align-items: center;
+  background: var(--tag-bg);
+  border: 1px solid var(--border-subtle);
+  border-radius: 9px;
+  padding: 2px;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.seg-btn {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 11px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition:
+    background-color 0.16s ease,
+    color 0.16s ease,
+    box-shadow 0.16s ease;
+  white-space: nowrap;
+}
+
+.seg-btn:hover {
+  color: var(--text-main);
+}
+
+.seg-btn.active {
+  background: var(--accent);
+  color: #ffffff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.24);
+}
+
+.settings-compact-select {
+  width: 165px;
+  padding: 6px 10px;
+  font-size: 12.5px;
+  flex-shrink: 0;
+}
+
+.settings-actions-inline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.btn-compact-action {
+  padding: 6px 11px;
+  font-size: 12.5px;
+  border-radius: 8px;
+  white-space: nowrap;
+}
+
+.btn-icon-subtle {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--tag-bg);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.15s ease;
+}
+
+.btn-icon-subtle:hover {
+  color: var(--text-main);
+  background: var(--bg-card-hover);
+  border-color: var(--border-accent);
+}
+
+.btn-icon-subtle:active {
+  transform: scale(0.94);
+}
+
+.settings-desc.status-active {
+  color: var(--status-green);
+  font-weight: 500;
 }
 
 .hotkey-manager-bar {
@@ -1214,6 +1462,7 @@ body.center-compact .btn-new-snippet {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  min-width: 0;
 }
 
 .settings-title {
@@ -1225,6 +1474,7 @@ body.center-compact .btn-new-snippet {
 .settings-desc {
   font-size: 11.5px;
   color: var(--text-muted);
+  line-height: 1.35;
 }
 
 /* Apple macOS / iOS Tactile Toggle Switch */
@@ -1324,15 +1574,9 @@ input:checked + .slider:before {
   }
 }
 
-.update-status-card {
-  gap: 12px;
-}
-
 .btn-update-action {
   flex-shrink: 0;
   white-space: nowrap;
-  padding: 6px 12px;
-  font-size: 12px;
 }
 
 .btn-update-action.ready {
@@ -1422,9 +1666,8 @@ input:checked + .slider:before {
   grid-template-columns: 1fr 1fr;
   gap: 12px;
   padding: 8px 11px 10px 11px;
-  margin-top: -4px;
-  border-radius: 10px;
-  background: var(--bg-card);
+  border-radius: 9px;
+  background: var(--input-bg);
   border: 1px solid var(--border-subtle);
 }
 

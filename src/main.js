@@ -1,5 +1,5 @@
 /**
- * SatzTresor v1.5.5 — Main Process
+ * SatzTresor v1.5.6 — Main Process
  * Supports:
  * - Centered Spotlight Mode (Apple-inspired floating palette with smooth blurred & dimmed desktop backdrop)
  * - Automatic Background Updates via GitHub Releases & NSIS Delta Updates (electron-updater)
@@ -34,7 +34,7 @@ const { SatzTresorUpdater } = require('./updater');
 
 const APP_ID = 'de.satztresor.app';
 const APP_NAME = 'SatzTresor';
-const APP_VERSION = '1.5.5';
+const APP_VERSION = '1.5.6';
 const CENTER_WIDTH_STANDARD = 1120;
 const CENTER_HEIGHT_STANDARD = 780;
 const CENTER_WIDTH_COMPACT = 580;
@@ -1106,6 +1106,40 @@ function formatHotkeyLabel(hk) {
 // ============================================================================
 // Import / Export & Tray Menu
 // ============================================================================
+function buildExportDefaultFilename() {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  return `SatzTresor_Backup_${y}-${m}-${d}.json`;
+}
+
+function notifyTransferFeedback({ ok, title, message, toast }) {
+  if (mainWindow && !mainWindow.isDestroyed() && isWindowEffectivelyVisible()) {
+    if (ok) {
+      mainWindow.webContents.send('satztresor-msg', {
+        type: 'showToast',
+        message: toast || `✓ ${message}`,
+      });
+    } else {
+      mainWindow.webContents.send('satztresor-msg', {
+        type: 'showAppAlert',
+        title,
+        message,
+      });
+    }
+    return Promise.resolve();
+  }
+
+  return withSystemDialog(() =>
+    dialog.showMessageBox({
+      type: ok ? 'info' : 'error',
+      title: `${APP_NAME} — ${title}`,
+      message,
+    })
+  );
+}
+
 async function openImportDialog() {
   const parentWin = mainWindow && mainWindow.isVisible() ? mainWindow : undefined;
   const { filePaths } = await withSystemDialog(() =>
@@ -1113,10 +1147,7 @@ async function openImportDialog() {
       title: 'Bausteine importieren',
       defaultPath: app.getPath('desktop'),
       filters: [
-        { name: 'Alle unterstützten Formate (*.ini, *.json, *.csv)', extensions: ['ini', 'json', 'csv'] },
-        { name: 'JSON-Dateien (*.json)', extensions: ['json'] },
-        { name: 'CSV-Dateien (*.csv)', extensions: ['csv'] },
-        { name: 'INI-Dateien (*.ini)', extensions: ['ini'] },
+        { name: 'SatzTresor-Dateien (*.json, *.ini, *.csv)', extensions: ['json', 'ini', 'csv'] },
       ],
       properties: ['openFile'],
     })
@@ -1127,56 +1158,63 @@ async function openImportDialog() {
     if (res.success) {
       restartKeyboardHook();
       sendDataToRenderer();
-      await withSystemDialog(() =>
-        dialog.showMessageBox(parentWin, {
-          type: 'info',
-          title: `${APP_NAME} — Import erfolgreich`,
-          message: `${res.count} Baustein(e) wurden erfolgreich importiert.`,
-        })
-      );
+      const label = res.count === 1 ? '1 Baustein importiert' : `${res.count} Bausteine importiert`;
+      await notifyTransferFeedback({
+        ok: true,
+        title: 'Import erfolgreich',
+        message: `${label}.`,
+        toast: `✓ ${label}`,
+      });
     } else {
-      await withSystemDialog(() =>
-        dialog.showMessageBox(parentWin, {
-          type: 'error',
-          title: `${APP_NAME} — Import-Fehler`,
-          message: res.error || 'Fehler beim Importieren.',
-        })
-      );
+      await notifyTransferFeedback({
+        ok: false,
+        title: 'Import fehlgeschlagen',
+        message: res.error || 'Die ausgewählte Datei konnte nicht importiert werden.',
+      });
     }
   }
 }
 
-async function exportSnippetsWithFormat(format) {
-  const ext = format.toLowerCase();
-  const filterMap = {
-    ini: [{ name: 'INI-Dateien', extensions: ['ini'] }],
-    json: [{ name: 'JSON-Dateien', extensions: ['json'] }],
-    csv: [{ name: 'CSV-Tabellen', extensions: ['csv'] }],
-  };
+async function openExportDialog(preferredFormat = 'json') {
+  const ext = ['json', 'csv', 'ini'].includes(String(preferredFormat || '').toLowerCase())
+    ? String(preferredFormat).toLowerCase()
+    : 'json';
+  const baseDefault = buildExportDefaultFilename().replace(/\.json$/i, `.${ext}`);
+  const allFilters = [
+    { name: 'SatzTresor-Sicherung (*.json)', extensions: ['json'] },
+    { name: 'CSV-Tabelle (*.csv)', extensions: ['csv'] },
+    { name: 'INI-Textdatei (*.ini)', extensions: ['ini'] },
+  ];
+  const orderedFilters = [
+    ...allFilters.filter((f) => f.extensions[0] === ext),
+    ...allFilters.filter((f) => f.extensions[0] !== ext),
+  ];
 
   const parentWin = mainWindow && mainWindow.isVisible() ? mainWindow : undefined;
   const { filePath } = await withSystemDialog(() =>
     dialog.showSaveDialog(parentWin, {
-      title: `Bausteine exportieren (${ext.toUpperCase()})`,
-      defaultPath: path.join(app.getPath('desktop'), `SatzTresor_Bausteine.${ext}`),
-      filters: filterMap[ext] || filterMap.json,
+      title: 'Bausteine exportieren',
+      defaultPath: path.join(app.getPath('desktop'), baseDefault),
+      filters: orderedFilters,
     })
   );
 
   if (filePath) {
     const ok = storage.exportSnippets(filePath);
-    await withSystemDialog(() =>
-      dialog.showMessageBox(parentWin, {
-        type: ok ? 'info' : 'error',
-        title: `${APP_NAME} — Export`,
-        message: ok ? `Erfolgreich exportiert nach:\n${filePath}` : 'Fehler beim Exportieren.',
-      })
-    );
+    const count = storage.getSnippets().length;
+    const countLabel = count === 1 ? '1 Baustein gesichert' : `${count} Bausteine gesichert`;
+    await notifyTransferFeedback({
+      ok,
+      title: ok ? 'Export erfolgreich' : 'Export fehlgeschlagen',
+      message: ok
+        ? `${countLabel} unter:\n${filePath}`
+        : 'Die Sicherungsdatei konnte am gewählten Ort nicht gespeichert werden.',
+      toast: `✓ ${countLabel}`,
+    });
   }
 }
 
 function updateTrayMenu() {
-  const isAutostart = getAutostartEnabled();
   const doubleTapOn = storage.getDoubleTapCtrlEnabled();
   const hotstringsOn = storage.getHotstringsEnabled();
   const activeHks = storage.getActiveHotkeys();
@@ -1191,20 +1229,18 @@ function updateTrayMenu() {
       label: `${APP_NAME} öffnen${openHint}`,
       click: () => toggleWindow(true, 'mouse'),
     },
-    { type: 'separator' },
     {
-      label: 'Aufruf per 2× kurz Strg',
-      type: 'checkbox',
-      checked: doubleTapOn,
-      click: (item) => {
-        storage.setDoubleTapCtrlEnabled(item.checked);
-        restartKeyboardHook();
-        sendDataToRenderer();
-        updateTrayMenu();
+      label: 'Neuer Baustein…',
+      click: () => {
+        showWindow({
+          source: 'mouse',
+          postShowMessage: { type: 'openManager' },
+        });
       },
     },
+    { type: 'separator' },
     {
-      label: 'Automatisches Ersetzen (Hotstrings)',
+      label: 'Automatische Textersetzung',
       type: 'checkbox',
       checked: hotstringsOn,
       click: (item) => {
@@ -1214,144 +1250,11 @@ function updateTrayMenu() {
         updateTrayMenu();
       },
     },
-    { type: 'separator' },
-    {
-      label: 'Hintergrund-Effekt',
-      submenu: [
-        {
-          label: 'Unscharf & abgedunkelt (Milchglas)',
-          type: 'radio',
-          checked: storage.getBackdropMode() === 'blur',
-          click: () => {
-            storage.setBackdropMode('blur');
-            syncNativeBackdrop();
-            sendDataToRenderer();
-            updateTrayMenu();
-          },
-        },
-        {
-          label: 'Vollständig ausblenden (Fokus)',
-          type: 'radio',
-          checked: storage.getBackdropMode() === 'solid',
-          click: () => {
-            storage.setBackdropMode('solid');
-            syncNativeBackdrop();
-            sendDataToRenderer();
-            updateTrayMenu();
-          },
-        },
-        {
-          label: 'Transparent (Kein Effekt)',
-          type: 'radio',
-          checked: storage.getBackdropMode() === 'off',
-          click: () => {
-            storage.setBackdropMode('off');
-            syncNativeBackdrop();
-            sendDataToRenderer();
-            updateTrayMenu();
-          },
-        },
-      ],
-    },
-    {
-      label: 'Design (Theme)',
-      submenu: [
-        {
-          label: 'Dunkel (Dark)',
-          type: 'radio',
-          checked: storage.getTheme() === 'dark',
-          click: () => {
-            storage.setTheme('dark');
-            syncSystemTheme();
-            syncNativeBackdrop();
-            sendDataToRenderer();
-            updateTrayMenu();
-          },
-        },
-        {
-          label: 'Hell (Light)',
-          type: 'radio',
-          checked: storage.getTheme() === 'light',
-          click: () => {
-            storage.setTheme('light');
-            syncSystemTheme();
-            syncNativeBackdrop();
-            sendDataToRenderer();
-            updateTrayMenu();
-          },
-        },
-      ],
-    },
-    {
-      label: 'Neuen Baustein anlegen…',
-      click: () => {
-        showWindow({
-          source: 'mouse',
-          postShowMessage: { type: 'openManager' },
-        });
-      },
-    },
-    {
-      label: 'Einstellungen…',
-      click: () => {
-        showWindow({
-          source: 'mouse',
-          postShowMessage: { type: 'openSettings' },
-        });
-      },
-    },
-    { type: 'separator' },
-    {
-      label: 'Mit Windows starten (im Hintergrund)',
-      type: 'checkbox',
-      checked: isAutostart,
-      click: (item) => {
-        setAutostartEnabled(item.checked);
-        sendDataToRenderer();
-        updateTrayMenu();
-      },
-    },
-    {
-      label: 'Bausteine exportieren…',
-      submenu: [
-        {
-          label: 'Als JSON-Datei (*.json)…',
-          click: () => exportSnippetsWithFormat('json'),
-        },
-        {
-          label: 'Als CSV-Tabelle (*.csv)…',
-          click: () => exportSnippetsWithFormat('csv'),
-        },
-        {
-          label: 'Als INI-Datei (*.ini)…',
-          click: () => exportSnippetsWithFormat('ini'),
-        },
-      ],
-    },
-    {
-      label: 'Bausteine importieren…',
-      click: () => openImportDialog(),
-    },
-    {
-      label: 'Datenordner öffnen…',
-      click: () => {
-        shell.openPath(path.dirname(storageFile));
-      },
-    },
-    {
-      label: 'Verschlüsselung verwalten…',
-      click: () => {
-        showWindow({
-          source: 'mouse',
-          postShowMessage: { type: 'manageEncryption' },
-        });
-      },
-    },
   ];
 
   if (storage.isEncrypted && !storage.isLocked) {
     template.push({
-      label: '🔒 Datenbank jetzt sperren',
+      label: 'Tresor jetzt sperren',
       click: () => {
         storage.lock();
         restartKeyboardHook();
@@ -1364,50 +1267,37 @@ function updateTrayMenu() {
     });
   }
 
+  template.push(
+    { type: 'separator' },
+    {
+      label: 'Einstellungen…',
+      click: () => {
+        showWindow({
+          source: 'mouse',
+          postShowMessage: { type: 'openSettings' },
+        });
+      },
+    }
+  );
+
   const updState = updater ? updater.getState() : null;
   const isUpdateReady =
     updState && (updState.status === 'downloaded' || updState.status === 'portable-available');
 
+  if (isUpdateReady) {
+    template.push({
+      label:
+        updState.status === 'portable-available'
+          ? `Update v${updState.availableVersion} herunterladen…`
+          : `Update v${updState.availableVersion} jetzt installieren`,
+      click: () => {
+        if (updater) updater.installNow();
+      },
+    });
+  }
+
   template.push(
     { type: 'separator' },
-    {
-      label: isUpdateReady
-        ? updState.status === 'portable-available'
-          ? `↓ Update v${updState.availableVersion} herunterladen…`
-          : `↻ Update v${updState.availableVersion} jetzt installieren`
-        : 'Nach Updates suchen…',
-      click: () => {
-        if (!updater) return;
-        if (isUpdateReady) {
-          updater.installNow();
-        } else {
-          showWindow({
-            source: 'mouse',
-            postShowMessage: { type: 'openSettings' },
-          });
-          updater.checkForUpdates({ manual: true });
-        }
-      },
-    },
-    {
-      label: 'Hilfe & Info',
-      click: () => {
-        withSystemDialog(() =>
-          dialog.showMessageBox({
-            type: 'info',
-            title: `Über ${APP_NAME} v${APP_VERSION}`,
-            message:
-              `${APP_NAME} v${APP_VERSION} — Moderner Satzbaustein-Manager\n\n` +
-              '• Aufruf: 2× kurz Strg antippen, System-Tray-Icon anklicken oder eigenes Tastenkürzel\n' +
-              '• Automatisches Ersetzen: Kürzel wie ;;mfg direkt in jedem Programm tippen\n' +
-              '• Erscheinungsbild: Zentriertes Spotlight-Fenster mit weichem Milchglas-Hintergrund\n' +
-              '• Schnelles Einfügen: [Alt] + [1..9] oder Eingabetaste\n' +
-              '• 100% Sicher vor Windows Clipboard-Verlauf (Win+V) + Clipboard-Wiederherstellung\n' +
-              '• Optionale AES-256-CBC PBKDF2 Verschlüsselung & automatische Backups',
-          })
-        );
-      },
-    },
     {
       label: 'Beenden',
       click: () => {
@@ -1581,7 +1471,7 @@ ipcMain.on('satztresor-msg', (event, data) => {
       }
       mainWindow.webContents.send('satztresor-msg', {
         type: 'showToast',
-        message: '📋 In Zwischenablage kopiert',
+        message: '✓ In Zwischenablage kopiert',
       });
       break;
     }
@@ -1592,7 +1482,7 @@ ipcMain.on('satztresor-msg', (event, data) => {
         sendDataToRenderer();
         mainWindow.webContents.send('satztresor-msg', {
           type: 'showToast',
-          message: isFav ? '⭐ Zu Favoriten hinzugefügt' : '☆ Aus Favoriten entfernt',
+          message: isFav ? '★ Zu Favoriten hinzugefügt' : 'Aus Favoriten entfernt',
         });
       }
       break;
@@ -1605,7 +1495,7 @@ ipcMain.on('satztresor-msg', (event, data) => {
         sendDataToRenderer();
         mainWindow.webContents.send('satztresor-msg', {
           type: 'showToast',
-          message: `📑 Dupliziert als "${newTitle}"`,
+          message: `✓ Dupliziert als „${newTitle}“`,
         });
       }
       break;
@@ -1626,8 +1516,8 @@ ipcMain.on('satztresor-msg', (event, data) => {
       mainWindow.webContents.send('satztresor-msg', {
         type: 'showToast',
         message: next
-          ? '📌 SatzTresor dauerhaft im Vordergrund fixiert'
-          : '🔓 Fixierung gelöst (Spotlight-Overlay)',
+          ? '✓ Im Vordergrund angeheftet'
+          : '✓ Anheftung gelöst',
       });
       break;
     }
@@ -1771,7 +1661,7 @@ ipcMain.on('satztresor-msg', (event, data) => {
       updateTrayMenu();
       mainWindow.webContents.send('satztresor-msg', {
         type: 'showToast',
-        message: data.enabled ? '⚡ Auto-Ersetzen aktiviert' : '⏸ Auto-Ersetzen deaktiviert',
+        message: data.enabled ? '✓ Automatische Textersetzung aktiv' : 'Automatische Textersetzung pausiert',
       });
       break;
     }
@@ -1868,12 +1758,17 @@ ipcMain.on('satztresor-msg', (event, data) => {
     }
 
     case 'exportDialog': {
-      exportSnippetsWithFormat(data.format || 'json');
+      openExportDialog(data.format || 'json');
       break;
     }
 
     case 'importDialog': {
       openImportDialog();
+      break;
+    }
+
+    case 'openDataFolder': {
+      shell.openPath(path.dirname(storageFile));
       break;
     }
 

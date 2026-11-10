@@ -1,5 +1,5 @@
 /**
- * SatzTresor v1.5.5 — Renderer Application Logic
+ * SatzTresor v1.5.6 — Renderer Application Logic
  * Apple-inspired Spotlight UI with token search, smart template prompts, hotstring configuration,
  * automatic background software updates, non-blocking confirmation modals, custom context menu,
  * favorites, and encryption management.
@@ -7,7 +7,7 @@
 
 (function () {
   const state = {
-    version: '1.5.5',
+    version: '1.5.6',
     layoutMode: 'center',
     centerCompact: false,
     backdropMode: 'blur', // 'blur' | 'solid' | 'off'
@@ -52,6 +52,7 @@
   const updateReadyPill = document.getElementById('updateReadyPill');
   const updateReadyLabel = document.getElementById('updateReadyLabel');
   const hotstringStatusPill = document.getElementById('hotstringStatusPill');
+  const hotstringStatusLabel = document.getElementById('hotstringStatusLabel');
 
   // Top buttons
   const btnLockNow = document.getElementById('btnLockNow');
@@ -76,9 +77,12 @@
   const editOriginalTitle = document.getElementById('editOriginalTitle');
   const editTitle = document.getElementById('editTitle');
   const editKuerzel = document.getElementById('editKuerzel');
+  const editKuerzelLiveBadge = document.getElementById('editKuerzelLiveBadge');
   const editCategory = document.getElementById('editCategory');
   const editContent = document.getElementById('editContent');
   const editFavorite = document.getElementById('editFavorite');
+  const btnToggleEditFavorite = document.getElementById('btnToggleEditFavorite');
+  const editFavoriteLabel = document.getElementById('editFavoriteLabel');
   const categoriesDatalist = document.getElementById('categoriesDatalist');
   const btnDuplicateFromManager = document.getElementById('btnDuplicateFromManager');
   const btnDeleteSnippet = document.getElementById('btnDeleteSnippet');
@@ -89,7 +93,9 @@
   const settingsModal = document.getElementById('settingsModal');
   const settingAutostart = document.getElementById('settingAutostart');
   const settingTheme = document.getElementById('settingTheme');
+  const themeSegmented = document.getElementById('themeSegmented');
   const settingBackdropMode = document.getElementById('settingBackdropMode');
+  const backdropSegmented = document.getElementById('backdropSegmented');
   const backdropBlurConfigPanel = document.getElementById('backdropBlurConfigPanel');
   const settingBackdropBlurPercent = document.getElementById('settingBackdropBlurPercent');
   const backdropBlurPercentValue = document.getElementById('backdropBlurPercentValue');
@@ -105,9 +111,10 @@
   const activeHotkeysList = document.getElementById('activeHotkeysList');
   const btnRecordHotkey = document.getElementById('btnRecordHotkey');
   const btnImportData = document.getElementById('btnImportData');
-  const btnExportIni = document.getElementById('btnExportIni');
-  const btnExportJson = document.getElementById('btnExportJson');
-  const btnExportCsv = document.getElementById('btnExportCsv');
+  const btnExportData = document.getElementById('btnExportData');
+  const btnOpenDataFolder = document.getElementById('btnOpenDataFolder');
+  const cryptoSettingsStatusDesc = document.getElementById('cryptoSettingsStatusDesc');
+  const cryptoSettingsBtnLabel = document.getElementById('cryptoSettingsBtnLabel');
   const btnOpenCryptoFromSettings = document.getElementById('btnOpenCryptoFromSettings');
   const btnLockFromSettings = document.getElementById('btnLockFromSettings');
   const updateStatusHeadline = document.getElementById('updateStatusHeadline');
@@ -157,8 +164,10 @@
 
   // Custom Context Menu
   const contextMenu = document.getElementById('contextMenu');
+  const ctxInsert = document.getElementById('ctxInsert');
   const ctxCopy = document.getElementById('ctxCopy');
   const ctxFavorite = document.getElementById('ctxFavorite');
+  const ctxFavoriteLabel = document.getElementById('ctxFavoriteLabel');
   const ctxDuplicate = document.getElementById('ctxDuplicate');
   const ctxEdit = document.getElementById('ctxEdit');
   const ctxDelete = document.getElementById('ctxDelete');
@@ -494,11 +503,20 @@
 
       case 'hotkeyRecorded':
         stopHotkeyRecording(false);
-        showToast(data.message || (data.success ? '✓ Gespeichert' : '⚠️ Nicht verfügbar'));
+        showToast(data.message || (data.success ? '✓ Gespeichert' : 'Nicht verfügbar'));
         break;
 
       case 'showToast':
         showToast(data.message || '✓ Fertig');
+        break;
+
+      case 'showAppAlert':
+        showConfirmDialog({
+          title: data.title || 'Hinweis',
+          message: data.message || '',
+          confirmText: 'Verstanden',
+          showCancel: false,
+        });
         break;
     }
   }
@@ -511,16 +529,47 @@
     if (btnLockFromSettings) {
       btnLockFromSettings.style.display = canLock ? 'inline-flex' : 'none';
     }
+    if (cryptoSettingsStatusDesc) {
+      cryptoSettingsStatusDesc.textContent = state.isEncrypted
+        ? 'Aktiv — Datenbank ist lokal mit Master-Passwort geschützt'
+        : 'Datenbank lokal mit einem Master-Passwort verschlüsseln';
+      cryptoSettingsStatusDesc.classList.toggle('status-active', !!state.isEncrypted);
+    }
+    if (cryptoSettingsBtnLabel) {
+      cryptoSettingsBtnLabel.textContent = state.isEncrypted ? 'Verwalten…' : 'Einrichten…';
+    }
+  }
+
+  function updateEditKuerzelLiveBadge() {
+    if (!editKuerzelLiveBadge || !editKuerzel) return;
+    const raw = editKuerzel.value.trim();
+    if (!raw) {
+      editKuerzelLiveBadge.textContent = 'Optional';
+      editKuerzelLiveBadge.classList.remove('active');
+      return;
+    }
+    if (state.hotstringsEnabled) {
+      const eff = computeEffectiveHotstring(raw, state.hotstringPrefix);
+      editKuerzelLiveBadge.textContent = `Tippe ${eff}`;
+      editKuerzelLiveBadge.classList.add('active');
+    } else {
+      editKuerzelLiveBadge.textContent = `Suchkürzel: ${raw}`;
+      editKuerzelLiveBadge.classList.add('active');
+    }
   }
 
   function updateHotstringUI() {
     const ex = computeEffectiveHotstring('mfg', state.hotstringPrefix);
     if (hotstringStatusPill) {
       hotstringStatusPill.classList.toggle('active', state.hotstringsEnabled);
-      hotstringStatusPill.textContent = state.hotstringsEnabled ? '⚡ Auto' : '⏸ Auto aus';
+      if (hotstringStatusLabel) {
+        hotstringStatusLabel.textContent = state.hotstringsEnabled ? 'Auto-Tippen' : 'Auto-Tippen aus';
+      } else {
+        hotstringStatusPill.textContent = state.hotstringsEnabled ? 'Auto-Tippen' : 'Auto-Tippen aus';
+      }
       hotstringStatusPill.title = state.hotstringsEnabled
-        ? `Automatisches Ersetzen aktiv (z. B. ${ex}) — Klicken zum Ausschalten`
-        : 'Automatisches Ersetzen beim Tippen ist deaktiviert — Klicken zum Einschalten';
+        ? `Automatische Textersetzung aktiv (z. B. ${ex}) — Klicken zum Pausieren`
+        : 'Automatische Textersetzung ist pausiert — Klicken zum Aktivieren';
     }
     if (settingHotstringsEnabled) {
       settingHotstringsEnabled.checked = state.hotstringsEnabled;
@@ -529,16 +578,18 @@
       settingHotstringPrefix.value = state.hotstringPrefix;
     }
     if (hotstringPrefixRow) {
-      hotstringPrefixRow.style.opacity = state.hotstringsEnabled ? '1' : '0.5';
+      hotstringPrefixRow.style.opacity = state.hotstringsEnabled ? '1' : '0.45';
+      hotstringPrefixRow.style.pointerEvents = state.hotstringsEnabled ? 'auto' : 'none';
     }
     if (hotstringDescPreview) {
-      hotstringDescPreview.textContent = `Tippe z. B. ${ex} in einem beliebigen Programm zum direkten Ersetzen`;
+      hotstringDescPreview.textContent = `Ersetzt Kürzel wie ${ex} direkt während des Tippens`;
     }
     if (editKuerzel) {
       editKuerzel.placeholder = state.hotstringPrefix
-        ? `z. B. mfg (löst aus bei ${ex})`
+        ? `z. B. mfg (wird zu ${ex})`
         : 'z. B. ;;mfg';
     }
+    updateEditKuerzelLiveBadge();
   }
 
   function formatHotkeyLabel(acc) {
@@ -601,7 +652,7 @@
     state.isRecordingHotkey = true;
     if (btnRecordHotkey) {
       btnRecordHotkey.classList.add('recording');
-      btnRecordHotkey.textContent = '🔴 Taste / Kombi drücken… (Esc = Abbruch)';
+      btnRecordHotkey.textContent = 'Taste drücken… (Esc = Abbruch)';
       btnRecordHotkey.focus();
     }
     sendIPC('pauseHotkeys', { paused: true });
@@ -612,7 +663,7 @@
     state.isRecordingHotkey = false;
     if (btnRecordHotkey) {
       btnRecordHotkey.classList.remove('recording');
-      btnRecordHotkey.textContent = '⌨️ + Eigenes Kürzel aufnehmen…';
+      btnRecordHotkey.textContent = '+ Kürzel aufnehmen';
     }
     if (wasRecording && notifyBackend) {
       sendIPC('pauseHotkeys', { paused: false });
@@ -720,9 +771,24 @@
     return { status: 'ok', accelerator: parts.join('+') };
   }
 
+  function syncSegmentedControls() {
+    if (themeSegmented) {
+      themeSegmented.querySelectorAll('[data-theme-val]').forEach((btn) => {
+        btn.classList.toggle('active', btn.dataset.themeVal === state.theme);
+      });
+    }
+    const bMode = state.backdropMode || (state.dimBackground ? 'blur' : 'off');
+    if (backdropSegmented) {
+      backdropSegmented.querySelectorAll('[data-backdrop-val]').forEach((btn) => {
+        btn.classList.toggle('active', btn.dataset.backdropVal === bMode);
+      });
+    }
+  }
+
   function applyTheme(theme) {
     document.documentElement.className = theme === 'light' ? 'light' : 'dark';
     if (settingTheme) settingTheme.value = theme;
+    syncSegmentedControls();
   }
 
   function applyWorkAreaInsets(insets) {
@@ -789,6 +855,7 @@
     cl.toggle('is-pinned', !!state.isPinned);
     cl.toggle('no-dim', bMode === 'off');
     cl.toggle('center-compact', !!state.centerCompact);
+    syncSegmentedControls();
     renderBackdropTuneUI();
   }
 
@@ -932,10 +999,19 @@
   }
 
   function renderCategories() {
-    const baseIcons = {
-      '[ Alle ]': '🌐 Alle',
-      '[ ⭐ Favoriten ]': '⭐ Favoriten',
-      '[ 🕒 Zuletzt ]': '🕒 Zuletzt',
+    const baseCategoryConfig = {
+      '[ Alle ]': {
+        label: 'Alle',
+        svg: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect></svg>',
+      },
+      '[ ⭐ Favoriten ]': {
+        label: 'Favoriten',
+        svg: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>',
+      },
+      '[ 🕒 Zuletzt ]': {
+        label: 'Zuletzt',
+        svg: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><polyline points="12 7 12 12 15.5 14"></polyline></svg>',
+      },
     };
 
     if (!state.categories.includes(state.activeCategory)) {
@@ -956,7 +1032,15 @@
       const btn = document.createElement('button');
       btn.className = 'category-pill' + (cat === state.activeCategory ? ' active' : '');
       btn.dataset.cat = cat;
-      btn.textContent = baseIcons[cat] || '📁 ' + cat;
+      const preset = baseCategoryConfig[cat];
+      if (preset) {
+        btn.innerHTML = preset.svg;
+        const lbl = document.createElement('span');
+        lbl.textContent = preset.label;
+        btn.appendChild(lbl);
+      } else {
+        btn.textContent = cat;
+      }
       btn.addEventListener('click', () => {
         state.activeCategory = cat;
         Array.from(categoriesBar.children).forEach((p) =>
@@ -1068,12 +1152,70 @@
         return;
       }
       lastRenderedListKey = nextListKey;
-      snippetList.innerHTML = `
-        <div class="empty-state">
-          <div class="empty-title">Keine Bausteine gefunden</div>
-          <div class="empty-hint">Drücke <kbd class="badge-kbd">Strg+N</kbd> oder klicke oben auf <kbd class="badge-kbd">+ Neu</kbd>, um einen Baustein anzulegen</div>
-        </div>
-      `;
+
+      const wrap = document.createElement('div');
+      wrap.className = 'empty-state';
+
+      const titleEl = document.createElement('div');
+      titleEl.className = 'empty-title';
+
+      const hintEl = document.createElement('div');
+      hintEl.className = 'empty-hint';
+
+      const actionsEl = document.createElement('div');
+      actionsEl.className = 'empty-actions';
+
+      if (state.snippets.length === 0) {
+        titleEl.textContent = 'Noch keine Bausteine vorhanden';
+        hintEl.textContent = 'Lege deinen ersten Satzbaustein an oder übernimm eine vorhandene Sicherungsdatei.';
+
+        const btnCreateFirst = document.createElement('button');
+        btnCreateFirst.type = 'button';
+        btnCreateFirst.className = 'btn btn-primary btn-compact-action';
+        btnCreateFirst.textContent = '+ Baustein anlegen';
+        btnCreateFirst.addEventListener('click', () => openManager(null));
+
+        const btnImportFirst = document.createElement('button');
+        btnImportFirst.type = 'button';
+        btnImportFirst.className = 'btn btn-secondary btn-compact-action';
+        btnImportFirst.textContent = 'Importieren…';
+        btnImportFirst.addEventListener('click', () => sendIPC('importDialog'));
+
+        actionsEl.appendChild(btnCreateFirst);
+        actionsEl.appendChild(btnImportFirst);
+      } else if (rawQuery !== '') {
+        titleEl.textContent = 'Keine passenden Bausteine';
+        hintEl.textContent = `Für „${searchInput.value.trim()}“ wurden keine Treffer gefunden.`;
+
+        const btnReset = document.createElement('button');
+        btnReset.type = 'button';
+        btnReset.className = 'btn btn-secondary btn-compact-action';
+        btnReset.textContent = 'Suche zurücksetzen';
+        btnReset.addEventListener('click', () => {
+          searchInput.value = '';
+          state.activeCategory = '[ Alle ]';
+          renderCategories();
+          filterAndRender();
+          searchInput.focus();
+        });
+        actionsEl.appendChild(btnReset);
+      } else if (state.activeCategory === '[ ⭐ Favoriten ]') {
+        titleEl.textContent = 'Noch keine Favoriten markiert';
+        hintEl.textContent = 'Klicke auf den Stern links neben einem Baustein, um ihn hier für den Schnellzugriff anzuheften.';
+      } else if (state.activeCategory === '[ 🕒 Zuletzt ]') {
+        titleEl.textContent = 'Noch kein Verlauf';
+        hintEl.textContent = 'Zuletzt eingefügte Bausteine erscheinen automatisch in dieser Ansicht.';
+      } else {
+        titleEl.textContent = 'Keine Bausteine in dieser Kategorie';
+        hintEl.textContent = 'Wähle eine andere Kategorie oder lege oben über „Neu“ einen Baustein an.';
+      }
+
+      wrap.appendChild(titleEl);
+      wrap.appendChild(hintEl);
+      if (actionsEl.children.length > 0) {
+        wrap.appendChild(actionsEl);
+      }
+      snippetList.replaceChildren(wrap);
       return;
     }
 
@@ -1424,16 +1566,22 @@
   // Context Menu (positioned relative to transformed .app-shell)
   function openContextMenu(clientX, clientY, item) {
     state.contextMenuSnippet = item;
-    ctxFavorite.textContent = item.favorite
-      ? '☆ Aus Favoriten entfernen'
-      : '⭐ Zu Favoriten hinzufügen';
+    if (ctxFavoriteLabel) {
+      ctxFavoriteLabel.textContent = item.favorite
+        ? 'Aus Favoriten entfernen'
+        : 'Als Favorit markieren';
+    }
+    const favSvg = ctxFavorite ? ctxFavorite.querySelector('svg') : null;
+    if (favSvg) {
+      favSvg.setAttribute('fill', item.favorite ? 'currentColor' : 'none');
+    }
 
     const shellRect = appShell
       ? appShell.getBoundingClientRect()
       : { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight };
 
     const menuWidth = contextMenu.offsetWidth || 195;
-    const menuHeight = contextMenu.offsetHeight || 195;
+    const menuHeight = contextMenu.offsetHeight || 225;
 
     const relX = clientX - shellRect.left;
     const relY = clientY - shellRect.top;
@@ -1504,6 +1652,16 @@
       }
     }
   });
+
+  if (ctxInsert) {
+    ctxInsert.addEventListener('click', () => {
+      const target = state.contextMenuSnippet;
+      closeContextMenu();
+      if (target) {
+        handleSnippetAction(target);
+      }
+    });
+  }
 
   ctxCopy.addEventListener('click', () => {
     if (state.contextMenuSnippet) {
@@ -1579,9 +1737,28 @@
     setTimeout(() => box.classList.remove('nudge'), 260);
   }
 
+  function syncEditFavoriteButtonUI() {
+    if (!btnToggleEditFavorite) return;
+    const fav = !!editFavorite.checked;
+    btnToggleEditFavorite.classList.toggle('active', fav);
+    if (editFavoriteLabel) {
+      editFavoriteLabel.textContent = fav ? 'Favorit aktiv' : 'Als Favorit';
+    }
+  }
+
+  if (btnToggleEditFavorite) {
+    btnToggleEditFavorite.addEventListener('click', () => {
+      editFavorite.checked = !editFavorite.checked;
+      syncEditFavoriteButtonUI();
+    });
+  }
+
+  if (editKuerzel) {
+    editKuerzel.addEventListener('input', updateEditKuerzelLiveBadge);
+  }
+
   function openManager(snippet = null) {
     closeContextMenu();
-    updateHotstringUI();
     if (snippet) {
       managerTitle.textContent = 'Baustein bearbeiten';
       editOriginalTitle.value = snippet.title;
@@ -1604,6 +1781,8 @@
       btnDuplicateFromManager.style.display = 'none';
     }
 
+    syncEditFavoriteButtonUI();
+    updateHotstringUI();
     state.managerInitialSnapshot = captureManagerSnapshot();
     managerModal.classList.add('active');
     setTimeout(() => editTitle.focus(), 50);
@@ -1707,6 +1886,7 @@
     if (settingDimBackground) settingDimBackground.checked = state.dimBackground;
     if (settingRestoreClipboard) settingRestoreClipboard.checked = state.restoreClipboard;
     if (settingDoubleTapCtrl) settingDoubleTapCtrl.checked = state.doubleTapCtrlEnabled;
+    syncSegmentedControls();
     updateHotstringUI();
     renderActiveHotkeys();
     updateSecurityButtonsUI();
@@ -1727,11 +1907,36 @@
     });
   }
 
+  if (themeSegmented) {
+    themeSegmented.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-theme-val]');
+      if (!btn) return;
+      const nextTheme = btn.dataset.themeVal;
+      if (!nextTheme || nextTheme === state.theme) return;
+      state.theme = nextTheme;
+      applyTheme(state.theme);
+      sendIPC('setTheme', { theme: nextTheme });
+    });
+  }
+
   if (settingTheme) {
     settingTheme.addEventListener('change', (e) => {
       state.theme = e.target.value;
       applyTheme(state.theme);
       sendIPC('setTheme', { theme: e.target.value });
+    });
+  }
+
+  if (backdropSegmented) {
+    backdropSegmented.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-backdrop-val]');
+      if (!btn) return;
+      const nextMode = btn.dataset.backdropVal;
+      if (!nextMode || nextMode === state.backdropMode) return;
+      state.backdropMode = nextMode;
+      state.dimBackground = state.backdropMode !== 'off';
+      syncBodyClasses();
+      sendIPC('setBackdropMode', { mode: state.backdropMode });
     });
   }
 
@@ -1835,9 +2040,8 @@
   }
 
   if (btnImportData) btnImportData.addEventListener('click', () => sendIPC('importDialog'));
-  if (btnExportIni) btnExportIni.addEventListener('click', () => sendIPC('exportDialog', { format: 'ini' }));
-  if (btnExportJson) btnExportJson.addEventListener('click', () => sendIPC('exportDialog', { format: 'json' }));
-  if (btnExportCsv) btnExportCsv.addEventListener('click', () => sendIPC('exportDialog', { format: 'csv' }));
+  if (btnExportData) btnExportData.addEventListener('click', () => sendIPC('exportDialog'));
+  if (btnOpenDataFolder) btnOpenDataFolder.addEventListener('click', () => sendIPC('openDataFolder'));
 
   if (btnOpenCryptoFromSettings) {
     btnOpenCryptoFromSettings.addEventListener('click', () => {

@@ -1,5 +1,5 @@
 /**
- * SatzTresor v1.5.5 — Automatic Update Engine (GitHub Releases + Delta Updates + Self-Update)
+ * SatzTresor v1.5.6 — Automatic Update Engine (GitHub Releases + Delta Updates + Self-Update)
  * - Installed NSIS builds: Silent background delta-downloads (.blockmap + SHA-512 verification)
  *   via electron-updater, installable with 1 click or automatically on next app quit,
  *   plus automatic direct-download silent installer (/S) fallback.

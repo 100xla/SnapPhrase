@@ -1,5 +1,5 @@
 /**
- * SatzTresor v1.5.5 — Storage & INI Database Engine
+ * SatzTresor v1.5.6 — Storage & INI Database Engine
  * Handles atomic file operations, smart hash-verified rolling backups, INI serialization,
  * AES-256-CBC database encryption (lock & password change), JSON/CSV/INI import/export,
  * debounced usage persistence, and application settings.
@@ -995,29 +995,30 @@ class Storage {
   exportSnippets(targetPath) {
     if (this.isLocked) return false;
     const ext = path.extname(targetPath).toLowerCase();
-    if (ext === '.json') {
-      return this.exportSnippetsJson(targetPath);
-    }
     if (ext === '.csv') {
       return this.exportSnippetsCsv(targetPath);
     }
-    try {
-      // Export snippets only (exclude internal settings section)
-      let out = '';
-      for (const [section, keys] of this.data.entries()) {
-        if (!section || this.isReservedSection(section)) continue;
-        out += `[${section}]\r\n`;
-        for (const [k, v] of keys.entries()) {
-          out += `${k}=${escapeIniValue(v)}\r\n`;
+    if (ext === '.ini') {
+      try {
+        // Export snippets only (exclude internal settings section)
+        let out = '';
+        for (const [section, keys] of this.data.entries()) {
+          if (!section || this.isReservedSection(section)) continue;
+          out += `[${section}]\r\n`;
+          for (const [k, v] of keys.entries()) {
+            out += `${k}=${escapeIniValue(v)}\r\n`;
+          }
+          out += '\r\n';
         }
-        out += '\r\n';
+        fs.writeFileSync(targetPath, out, 'utf8');
+        return true;
+      } catch (err) {
+        console.error('[Storage] Export error:', err);
+        return false;
       }
-      fs.writeFileSync(targetPath, out, 'utf8');
-      return true;
-    } catch (err) {
-      console.error('[Storage] Export error:', err);
-      return false;
     }
+    const finalPath = ext ? targetPath : `${targetPath}.json`;
+    return this.exportSnippetsJson(finalPath);
   }
 
   exportSnippetsJson(targetPath) {
@@ -1070,7 +1071,7 @@ class Storage {
         raw.startsWith('TSENC:')
       ) {
         throw new Error(
-          'Diese INI-Datei ist mit AES-256 verschlüsselt. Bitte exportiere die Bausteine zuerst im entsperrten SatzTresor als unverschlüsselte Datei (JSON/INI/CSV).'
+          'Diese Datei ist mit einem Master-Passwort verschlüsselt. Bitte exportiere die Bausteine zuerst im entsperrten SatzTresor über „Exportieren“.'
         );
       }
       const tempStorage = new Storage(sourcePath);
@@ -1095,10 +1096,15 @@ class Storage {
     try {
       const raw = fs.readFileSync(sourcePath, 'utf8');
       const parsed = JSON.parse(raw);
-      if (!Array.isArray(parsed)) throw new Error('Ungültiges Format: JSON-Array erwartet');
+      const items = Array.isArray(parsed)
+        ? parsed
+        : parsed && Array.isArray(parsed.snippets)
+          ? parsed.snippets
+          : null;
+      if (!items) throw new Error('Ungültiges Dateiformat: Keine Satzbausteine in der JSON-Datei gefunden.');
 
       let count = 0;
-      for (const item of parsed) {
+      for (const item of items) {
         const title = String(item.title || '').replace(/[\r\n\[\]]/g, ' ').trim();
         if (!title || this.isReservedSection(title)) continue;
 

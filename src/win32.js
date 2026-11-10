@@ -1,5 +1,5 @@
 /**
- * SatzTresor v1.5.5 — Win32 Native Integration (Koffi FFI)
+ * SatzTresor v1.5.6 — Win32 Native Integration (Koffi FFI)
  * Handles window focus, clipboard protection (Win+V history exclusion),
  * atomic SendInput keyboard simulation, unified Low-Level Keyboard Hook (WH_KEYBOARD_LL)
  * for Double-Tap Ctrl trigger + automatic Hotstring expansion,

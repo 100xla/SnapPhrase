@@ -75,9 +75,9 @@
 
   <!-- Categories Filter Bar -->
   <div id="categoriesBar" class="categories-bar">
-    <button class="category-pill active" data-cat="[ Alle ]">🌐 Alle</button>
-    <button class="category-pill" data-cat="[ ⭐ Favoriten ]">⭐ Favoriten</button>
-    <button class="category-pill" data-cat="[ 🕒 Zuletzt ]">🕒 Zuletzt</button>
+    <button class="category-pill active" data-cat="[ Alle ]">Alle</button>
+    <button class="category-pill" data-cat="[ ⭐ Favoriten ]">Favoriten</button>
+    <button class="category-pill" data-cat="[ 🕒 Zuletzt ]">Zuletzt</button>
   </div>
 
   <!-- Snippets List -->
@@ -94,46 +94,52 @@
           <path d="M13 7l-3 5h4l-3 5"/>
         </svg>
         SatzTresor
-        <span id="versionTag" class="version-pill">v1.5.5</span>
+        <span id="versionTag" class="version-pill">v1.5.6</span>
       </div>
       <button id="updateReadyPill" class="update-ready-pill" style="display: none;" title="Update jetzt installieren und neu starten">
         <span class="update-dot"></span>
         <span id="updateReadyLabel">Update bereit</span>
       </button>
-      <button id="hotstringStatusPill" class="status-pill active" title="Automatisches Ersetzen beim Tippen (Klicken zum Umschalten)">
-        ⚡ Auto
+      <button id="hotstringStatusPill" class="status-pill active" title="Automatische Textersetzung beim Tippen (Klicken zum Umschalten)">
+        <span class="status-dot"></span>
+        <span id="hotstringStatusLabel">Auto-Tippen</span>
       </button>
       <span id="toastMsg" class="toast-msg">✓ Fertig</span>
     </div>
     <div class="footer-hints">
       <div class="hint-item"><span class="badge-kbd">↵</span> Einfügen</div>
       <div class="hint-item"><span class="badge-kbd">Tab</span> Bearbeiten</div>
+      <div class="hint-item"><span class="badge-kbd">Strg+N</span> Neu</div>
       <div class="hint-item"><span class="badge-kbd">Esc</span> Schließen</div>
     </div>
   </div>
 
   <!-- Custom Context Menu (Rechtsklick) -->
   <div id="contextMenu" class="context-menu">
+    <div class="context-item" id="ctxInsert">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 10 4 15 9 20"></polyline><path d="M20 4v7a4 4 0 0 1-4 4H4"></path></svg>
+      <span>Einfügen</span>
+    </div>
     <div class="context-item" id="ctxCopy">
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-      Nur kopieren
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+      <span>Nur kopieren</span>
     </div>
     <div class="context-item" id="ctxFavorite">
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
-      ⭐ Zu Favoriten
-    </div>
-    <div class="context-item" id="ctxDuplicate">
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect></svg>
-      📑 Duplizieren
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
+      <span id="ctxFavoriteLabel">Als Favorit markieren</span>
     </div>
     <div class="context-separator"></div>
     <div class="context-item" id="ctxEdit">
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
-      Bearbeiten
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
+      <span>Bearbeiten…</span>
+    </div>
+    <div class="context-item" id="ctxDuplicate">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect></svg>
+      <span>Duplizieren</span>
     </div>
     <div class="context-item danger" id="ctxDelete">
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
-      Löschen
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+      <span>Löschen…</span>
     </div>
   </div>
 
@@ -141,8 +147,8 @@
   <div id="promptModal" class="modal-overlay">
     <div class="modal-box">
       <div class="modal-header">
-        <div class="modal-title" id="promptTitle">Baustein anpassen</div>
-        <span class="badge-kbd">Esc zum Abbrechen</span>
+        <div class="modal-title" id="promptTitle">Baustein ausfüllen</div>
+        <span class="badge-kbd">Esc</span>
       </div>
       <div class="modal-body" id="promptFieldsContainer">
         <!-- Generated inputs -->
@@ -164,52 +170,58 @@
     <div class="modal-box" style="max-width: 640px;">
       <div class="modal-header">
         <div class="modal-title" id="managerTitle">Baustein bearbeiten</div>
-        <span class="badge-kbd">Strg+S zum Speichern</span>
+        <span class="badge-kbd">Strg+S</span>
       </div>
       <div class="modal-body">
         <input type="hidden" id="editOriginalTitle">
         
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+        <div class="manager-grid-row">
           <div class="form-group">
-            <label class="form-label">Titel / Name</label>
-            <input type="text" id="editTitle" class="form-input" placeholder="z. B. Mit freundlichen Grüßen">
+            <label class="form-label" for="editTitle">Titel</label>
+            <input type="text" id="editTitle" class="form-input" placeholder="z. B. Freundliche Grußformel">
           </div>
           <div class="form-group">
-            <label class="form-label" id="editKuerzelLabel">Kürzel (Auto-Ersetzen / Suche)</label>
-            <input type="text" id="editKuerzel" class="form-input" placeholder="z. B. mfg (wird zu ;;mfg)">
+            <div class="form-label-row">
+              <label class="form-label" id="editKuerzelLabel" for="editKuerzel">Kürzel</label>
+              <span id="editKuerzelLiveBadge" class="field-live-hint">Optional</span>
+            </div>
+            <input type="text" id="editKuerzel" class="form-input" placeholder="z. B. mfg">
           </div>
         </div>
 
-        <div style="display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: flex-end;">
+        <div class="manager-grid-row manager-cat-fav-row">
           <div class="form-group">
-            <label class="form-label">Kategorie</label>
-            <input type="text" id="editCategory" class="form-input" placeholder="z. B. E-Mail, Support, Vorlagen..." list="categoriesDatalist">
+            <label class="form-label" for="editCategory">Kategorie <span class="form-label-sub">(optional)</span></label>
+            <input type="text" id="editCategory" class="form-input" placeholder="z. B. E-Mail, Angebot, Support" list="categoriesDatalist">
             <datalist id="categoriesDatalist"></datalist>
           </div>
-          <div class="form-group" style="padding-bottom: 8px;">
-            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px;">
-              <input type="checkbox" id="editFavorite" style="width: 16px; height: 16px;">
-              <span>⭐ Zu Favoriten</span>
-            </label>
+          <div class="form-group">
+            <span class="form-label">Schnellzugriff</span>
+            <input type="checkbox" id="editFavorite" style="display: none;">
+            <button type="button" id="btnToggleEditFavorite" class="fav-toggle-btn">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+              </svg>
+              <span id="editFavoriteLabel">Als Favorit</span>
+            </button>
           </div>
         </div>
 
         <div class="form-group">
-          <div style="display: flex; justify-content: space-between; align-items: center;">
-            <label class="form-label">Inhalt</label>
-            <span style="font-size: 11px; color: var(--text-dim);">Platzhalter anklicken zum Einfügen</span>
+          <div class="form-label-row">
+            <label class="form-label" for="editContent">Textinhalt</label>
+            <span class="form-label-hint">Dynamische Platzhalter per Klick einfügen</span>
           </div>
-          <textarea id="editContent" class="form-textarea" placeholder="Dein Textbaustein..."></textarea>
+          <textarea id="editContent" class="form-textarea" placeholder="Schreibe oder kopiere hier deinen Textbaustein hinein…"></textarea>
           <div class="template-chips">
-            <span class="template-chip" data-insert="{cursor}">{cursor}</span>
-            <span class="template-chip" data-insert="{datum}">{datum}</span>
-            <span class="template-chip" data-insert="{datum:YYYY-MM-DD}">{datum:YYYY-MM-DD}</span>
-            <span class="template-chip" data-insert="{datum:+1d}">{datum:+1d} (Morgen)</span>
-            <span class="template-chip" data-insert="{wochentag}">{wochentag}</span>
-            <span class="template-chip" data-insert="{zeit}">{zeit}</span>
-            <span class="template-chip" data-insert="{clipboard}">{clipboard}</span>
-            <span class="template-chip" data-insert="{?Name}">{?Variable}</span>
-            <span class="template-chip" data-insert="{?Anrede=Frau|Herr|Guten Tag}">{?Dropdown=A|B}</span>
+            <button type="button" class="template-chip" data-insert="{cursor}" title="Setzt den Schreibcursor nach dem Einfügen exakt an diese Stelle ({cursor})">Cursor-Position</button>
+            <button type="button" class="template-chip" data-insert="{datum}" title="Aktuelles Datum einfügen ({datum})">Datum heute</button>
+            <button type="button" class="template-chip" data-insert="{datum:+1d}" title="Morgiges Datum einfügen ({datum:+1d})">Morgen</button>
+            <button type="button" class="template-chip" data-insert="{wochentag}" title="Aktuellen Wochentag einfügen ({wochentag})">Wochentag</button>
+            <button type="button" class="template-chip" data-insert="{zeit}" title="Aktuelle Uhrzeit einfügen ({zeit})">Uhrzeit</button>
+            <button type="button" class="template-chip" data-insert="{clipboard}" title="Vorher kopierten Text aus der Zwischenablage einfügen ({clipboard})">Zwischenablage</button>
+            <button type="button" class="template-chip" data-insert="{?Name}" title="Fragt beim Einfügen einen freien Textwert ab ({?Name})">Eingabefeld</button>
+            <button type="button" class="template-chip" data-insert="{?Anrede=Frau|Herr|Guten Tag}" title="Zeigt beim Einfügen ein Auswahlmenü ({?Anrede=Frau|Herr|Guten Tag})">Auswahlmenü</button>
           </div>
         </div>
       </div>
@@ -228,189 +240,223 @@
 
   <!-- Settings Modal -->
   <div id="settingsModal" class="modal-overlay">
-    <div class="modal-box" style="max-width: 520px;">
+    <div class="modal-box settings-modal-box">
       <div class="modal-header">
         <div class="modal-title">Einstellungen</div>
         <span class="badge-kbd">Esc</span>
       </div>
-      <div class="modal-body" style="gap: 10px;">
-        <div class="settings-section-header">Allgemein & Darstellung</div>
+      <div class="modal-body settings-modal-body">
 
-        <div class="settings-row">
-          <div class="settings-label-group">
-            <span class="settings-title">Mit Windows starten</span>
-            <span class="settings-desc">SatzTresor beim Systemstart still im Hintergrund bereitstellen</span>
-          </div>
-          <label class="switch">
-            <input type="checkbox" id="settingAutostart">
-            <span class="slider"></span>
-          </label>
-        </div>
-
-        <div class="settings-row">
-          <div class="settings-label-group">
-            <span class="settings-title">Erscheinungsbild (Theme)</span>
-            <span class="settings-desc">Wähle zwischen dunklem und hellem Design</span>
-          </div>
-          <select id="settingTheme" class="form-select" style="width: 135px;">
-            <option value="dark">🌙 Dunkel</option>
-            <option value="light">☀️ Hell</option>
-          </select>
-        </div>
-
-        <div class="settings-row" id="backdropModeRow">
-          <div class="settings-label-group">
-            <span class="settings-title">Hintergrund beim Aufruf</span>
-            <span class="settings-desc">Hintergrund hinter der App weichzeichnen und sanft abdunkeln</span>
-          </div>
-          <select id="settingBackdropMode" class="form-select" style="width: 215px;">
-            <option value="blur">🌫️ Unscharf &amp; abgedunkelt</option>
-            <option value="solid">🌑 Vollständig ausblenden (Fokus)</option>
-            <option value="off">🪟 Transparent (Kein Effekt)</option>
-          </select>
-        </div>
-
-        <div id="backdropBlurConfigPanel" class="backdrop-blur-tune-panel">
-          <div class="edge-offset-wrap">
-            <div class="edge-offset-label-row">
-              <span>Unschärfe</span>
-              <span id="backdropBlurPercentValue" class="edge-offset-badge">65 %</span>
+        <!-- 1. Darstellung & System -->
+        <div class="settings-section-block">
+          <div class="settings-section-header">Darstellung &amp; System</div>
+          <div class="settings-card">
+            <div class="settings-row">
+              <div class="settings-label-group">
+                <span class="settings-title">Mit Windows starten</span>
+                <span class="settings-desc">Beim Anmelden automatisch im Hintergrund bereitstellen</span>
+              </div>
+              <label class="switch">
+                <input type="checkbox" id="settingAutostart">
+                <span class="slider"></span>
+              </label>
             </div>
-            <input type="range" id="settingBackdropBlurPercent" class="edge-range-input" min="0" max="100" step="5" value="65">
-          </div>
-          <div class="edge-offset-wrap">
-            <div class="edge-offset-label-row">
-              <span>Abdunklung</span>
-              <span id="backdropDimPercentValue" class="edge-offset-badge">60 %</span>
+
+            <div class="settings-row">
+              <div class="settings-label-group">
+                <span class="settings-title">Erscheinungsbild</span>
+                <span class="settings-desc">Farbschema der Oberfläche</span>
+              </div>
+              <div class="seg-control" id="themeSegmented" role="group" aria-label="Erscheinungsbild">
+                <button type="button" class="seg-btn active" data-theme-val="dark">Dunkel</button>
+                <button type="button" class="seg-btn" data-theme-val="light">Hell</button>
+              </div>
             </div>
-            <input type="range" id="settingBackdropDimPercent" class="edge-range-input" min="0" max="90" step="5" value="60">
-          </div>
-        </div>
 
-        <div class="settings-row">
-          <div class="settings-label-group">
-            <span class="settings-title">Zwischenablage wiederherstellen</span>
-            <span class="settings-desc">Vorherigen kopierten Text nach dem Einfügen beibehalten</span>
-          </div>
-          <label class="switch">
-            <input type="checkbox" id="settingRestoreClipboard">
-            <span class="slider"></span>
-          </label>
-        </div>
+            <div class="settings-row settings-row-stackable" id="backdropModeRow">
+              <div class="settings-row-inline">
+                <div class="settings-label-group">
+                  <span class="settings-title">Hintergrund-Fokus</span>
+                  <span class="settings-desc">Desktop hinter dem Suchfenster ruhig ausblenden</span>
+                </div>
+                <div class="seg-control" id="backdropSegmented" role="group" aria-label="Hintergrund-Fokus">
+                  <button type="button" class="seg-btn active" data-backdrop-val="blur">Milchglas</button>
+                  <button type="button" class="seg-btn" data-backdrop-val="solid">Dunkel</button>
+                  <button type="button" class="seg-btn" data-backdrop-val="off">Aus</button>
+                </div>
+              </div>
+              <div id="backdropBlurConfigPanel" class="backdrop-blur-tune-panel">
+                <div class="edge-offset-wrap">
+                  <div class="edge-offset-label-row">
+                    <span>Unschärfe</span>
+                    <span id="backdropBlurPercentValue" class="edge-offset-badge">65 %</span>
+                  </div>
+                  <input type="range" id="settingBackdropBlurPercent" class="edge-range-input" min="0" max="100" step="5" value="65">
+                </div>
+                <div class="edge-offset-wrap">
+                  <div class="edge-offset-label-row">
+                    <span>Abdunklung</span>
+                    <span id="backdropDimPercentValue" class="edge-offset-badge">60 %</span>
+                  </div>
+                  <input type="range" id="settingBackdropDimPercent" class="edge-range-input" min="0" max="90" step="5" value="60">
+                </div>
+              </div>
+            </div>
 
-        <div class="settings-section-header" style="margin-top: 6px;">⚡ Automatisches Ersetzen (Hotstrings)</div>
-
-        <div class="settings-row">
-          <div class="settings-label-group">
-            <span class="settings-title">Kürzel beim Tippen automatisch ersetzen</span>
-            <span class="settings-desc" id="hotstringDescPreview">Tippe z. B. ;;mfg in einem beliebigen Programm zum direkten Ersetzen</span>
-          </div>
-          <label class="switch">
-            <input type="checkbox" id="settingHotstringsEnabled">
-            <span class="slider"></span>
-          </label>
-        </div>
-
-        <div class="settings-row" id="hotstringPrefixRow">
-          <div class="settings-label-group">
-            <span class="settings-title">Auslöse-Präfix</span>
-            <span class="settings-desc">Schützt vor versehentlichem Auslösen mitten im Wort</span>
-          </div>
-          <select id="settingHotstringPrefix" class="form-select" style="width: 165px;">
-            <option value=";;">;; (z. B. ;;mfg)</option>
-            <option value="//">// (z. B. //mfg)</option>
-            <option value="::">:: (z. B. ::mfg)</option>
-            <option value="#"># (z. B. #mfg)</option>
-            <option value="">Kein Standard-Präfix</option>
-          </select>
-        </div>
-
-        <div class="settings-section-header" style="margin-top: 6px;">Aufruf & Tastenkürzel</div>
-
-        <div class="settings-row">
-          <div class="settings-label-group">
-            <span class="settings-title">2× kurz Strg antippen</span>
-            <span class="settings-desc">Zweimal kurz hintereinander Strg drücken (kein Texteingriff, null Konflikte)</span>
-          </div>
-          <label class="switch">
-            <input type="checkbox" id="settingDoubleTapCtrl">
-            <span class="slider"></span>
-          </label>
-        </div>
-
-        <div class="settings-row" style="flex-direction: column; align-items: stretch; gap: 8px;">
-          <div class="settings-label-group">
-            <span class="settings-title">Tastenkombinationen</span>
-            <span class="settings-desc">Aktive Kürzel verwalten oder eigene Taste aufnehmen (z. B. Strg+&lt;, Strg+#, F9, Rollen)</span>
-          </div>
-          <div class="hotkey-manager-bar">
-            <div id="activeHotkeysList" class="hotkey-chips-list"></div>
-            <button type="button" id="btnRecordHotkey" class="btn-record-hotkey">
-              ⌨️ + Eigenes Kürzel aufnehmen…
-            </button>
-          </div>
-        </div>
-
-        <div class="settings-section-header" style="margin-top: 6px;">Daten & Sicherheit</div>
-
-        <div>
-          <div style="display: flex; gap: 8px; margin-bottom: 8px;">
-            <button id="btnImportData" class="btn btn-secondary" style="flex: 1; justify-content: center;">
-              📥 Bausteine importieren…
-            </button>
-          </div>
-          <div style="display: flex; gap: 8px;">
-            <button id="btnExportJson" class="btn btn-secondary" style="flex: 1; justify-content: center;">Export JSON</button>
-            <button id="btnExportCsv" class="btn btn-secondary" style="flex: 1; justify-content: center;">Export CSV</button>
-            <button id="btnExportIni" class="btn btn-secondary" style="flex: 1; justify-content: center;">Export INI</button>
-          </div>
-        </div>
-
-        <div style="display: flex; gap: 8px; margin-top: 4px;">
-          <button id="btnOpenCryptoFromSettings" class="btn btn-secondary" style="flex: 1; justify-content: center;">
-            🔒 AES-256 Verschlüsselung
-          </button>
-          <button id="btnLockFromSettings" class="btn btn-secondary" style="display: none; justify-content: center;">
-            🔐 Jetzt sperren
-          </button>
-        </div>
-
-        <div class="settings-section-header" style="margin-top: 6px;">Softwareupdate</div>
-
-        <div class="settings-row update-status-card">
-          <div class="settings-label-group" style="flex: 1; min-width: 0;">
-            <span class="settings-title" id="updateStatusHeadline">SatzTresor v1.5.5</span>
-            <span class="settings-desc" id="updateStatusDesc">Automatische Hintergrund-Updates bereit</span>
-            <div id="updateProgressWrap" class="update-progress-wrap" style="display: none;">
-              <div id="updateProgressBar" class="update-progress-bar" style="width: 0%;"></div>
+            <div class="settings-row">
+              <div class="settings-label-group">
+                <span class="settings-title">Zwischenablage beibehalten</span>
+                <span class="settings-desc">Vorher kopierten Inhalt nach dem Einfügen wiederherstellen</span>
+              </div>
+              <label class="switch">
+                <input type="checkbox" id="settingRestoreClipboard">
+                <span class="slider"></span>
+              </label>
             </div>
           </div>
-          <button type="button" id="btnUpdateAction" class="btn btn-secondary btn-update-action">
-            Jetzt prüfen
-          </button>
         </div>
 
-        <div class="settings-row">
-          <div class="settings-label-group">
-            <span class="settings-title">Updates automatisch herunterladen</span>
-            <span class="settings-desc">Neue Versionen still im Hintergrund laden und beim Beenden installieren</span>
+        <!-- 2. Aufruf & Textersetzung -->
+        <div class="settings-section-block">
+          <div class="settings-section-header">Aufruf &amp; Textersetzung</div>
+          <div class="settings-card">
+            <div class="settings-row">
+              <div class="settings-label-group">
+                <span class="settings-title">2× kurz Strg drücken</span>
+                <span class="settings-desc">Öffnet SatzTresor sofort aus jedem Programm</span>
+              </div>
+              <label class="switch">
+                <input type="checkbox" id="settingDoubleTapCtrl">
+                <span class="slider"></span>
+              </label>
+            </div>
+
+            <div class="settings-row settings-row-stackable">
+              <div class="settings-label-group">
+                <span class="settings-title">Tastenkürzel</span>
+                <span class="settings-desc">Zusätzliche globale Tastenkombination zum Öffnen</span>
+              </div>
+              <div class="hotkey-manager-bar">
+                <div id="activeHotkeysList" class="hotkey-chips-list"></div>
+                <button type="button" id="btnRecordHotkey" class="btn-record-hotkey">+ Kürzel aufnehmen</button>
+              </div>
+            </div>
+
+            <div class="settings-row">
+              <div class="settings-label-group">
+                <span class="settings-title">Automatische Textersetzung</span>
+                <span class="settings-desc" id="hotstringDescPreview">Tippe z. B. ;;mfg in einem beliebigen Programm zum direkten Ersetzen</span>
+              </div>
+              <label class="switch">
+                <input type="checkbox" id="settingHotstringsEnabled">
+                <span class="slider"></span>
+              </label>
+            </div>
+
+            <div class="settings-row" id="hotstringPrefixRow">
+              <div class="settings-label-group">
+                <span class="settings-title">Auslöse-Präfix</span>
+                <span class="settings-desc">Verhindert versehentliches Ersetzen mitten im Wort</span>
+              </div>
+              <select id="settingHotstringPrefix" class="form-select settings-compact-select">
+                <option value=";;">;; (z. B. ;;mfg)</option>
+                <option value="//">// (z. B. //mfg)</option>
+                <option value="::">:: (z. B. ::mfg)</option>
+                <option value="#"># (z. B. #mfg)</option>
+                <option value="">Ohne Präfix</option>
+              </select>
+            </div>
           </div>
-          <label class="switch">
-            <input type="checkbox" id="settingAutoUpdate" checked>
-            <span class="slider"></span>
-          </label>
         </div>
 
-        <div class="settings-row" id="updateRepoRow" style="gap: 8px;">
-          <div class="settings-label-group" style="flex: 1; min-width: 0;">
-            <span class="settings-title">GitHub Update-Quelle</span>
-            <span class="settings-desc">Öffentliches Repository für Releases (Standard: 100xla/satztresor)</span>
-          </div>
-          <div style="display: flex; gap: 6px; align-items: center;">
-            <input type="text" id="settingUpdateRepo" class="form-input" placeholder="100xla/satztresor" spellcheck="false" style="width: 155px; padding: 5px 9px; font-size: 12px;">
-            <button type="button" id="btnSaveUpdateRepo" class="btn btn-secondary" style="padding: 5px 10px; font-size: 12px;">Speichern</button>
+        <!-- 3. Daten & Tresor -->
+        <div class="settings-section-block">
+          <div class="settings-section-header">Daten &amp; Tresor</div>
+          <div class="settings-card">
+            <div class="settings-row">
+              <div class="settings-label-group">
+                <span class="settings-title">Bausteine sichern &amp; laden</span>
+                <span class="settings-desc">Alle Bausteine in einer Datei sichern oder wiederherstellen</span>
+              </div>
+              <div class="settings-actions-inline">
+                <button type="button" id="btnImportData" class="btn btn-secondary btn-compact-action">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <polyline points="7 10 12 15 17 10"></polyline>
+                    <line x1="12" y1="15" x2="12" y2="3"></line>
+                  </svg>
+                  <span>Importieren</span>
+                </button>
+                <button type="button" id="btnExportData" class="btn btn-secondary btn-compact-action">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <polyline points="17 8 12 3 7 8"></polyline>
+                    <line x1="12" y1="3" x2="12" y2="15"></line>
+                  </svg>
+                  <span>Exportieren</span>
+                </button>
+                <button type="button" id="btnOpenDataFolder" class="btn-icon-subtle" title="Lokalen Speicherordner im Explorer öffnen">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            <div class="settings-row">
+              <div class="settings-label-group">
+                <span class="settings-title">Passwortschutz (AES-256)</span>
+                <span class="settings-desc" id="cryptoSettingsStatusDesc">Datenbank lokal mit einem Master-Passwort verschlüsseln</span>
+              </div>
+              <div class="settings-actions-inline">
+                <button type="button" id="btnOpenCryptoFromSettings" class="btn btn-secondary btn-compact-action">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+                  </svg>
+                  <span id="cryptoSettingsBtnLabel">Einrichten…</span>
+                </button>
+                <button type="button" id="btnLockFromSettings" class="btn btn-secondary btn-compact-action" style="display: none;">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                    <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                  </svg>
+                  <span>Sperren</span>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
+
+        <!-- 4. Softwareupdate -->
+        <div class="settings-section-block">
+          <div class="settings-section-header">Softwareupdate</div>
+          <div class="settings-card">
+            <div class="settings-row">
+              <div class="settings-label-group" style="flex: 1; min-width: 0;">
+                <span class="settings-title" id="updateStatusHeadline">SatzTresor v1.5.6</span>
+                <span class="settings-desc" id="updateStatusDesc">Automatische Hintergrund-Updates bereit</span>
+                <div id="updateProgressWrap" class="update-progress-wrap" style="display: none;">
+                  <div id="updateProgressBar" class="update-progress-bar" style="width: 0%;"></div>
+                </div>
+              </div>
+              <button type="button" id="btnUpdateAction" class="btn btn-secondary btn-compact-action btn-update-action">
+                Jetzt prüfen
+              </button>
+            </div>
+
+            <div class="settings-row">
+              <div class="settings-label-group">
+                <span class="settings-title">Automatisch aktualisieren</span>
+                <span class="settings-desc">Neue Versionen im Hintergrund laden und beim Beenden installieren</span>
+              </div>
+              <label class="switch">
+                <input type="checkbox" id="settingAutoUpdate" checked>
+                <span class="slider"></span>
+              </label>
+            </div>
+          </div>
+        </div>
+
       </div>
       <div class="modal-footer">
         <button id="btnCloseSettings" class="btn btn-primary">Fertig</button>

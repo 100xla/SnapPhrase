@@ -1,5 +1,5 @@
 /**
- * SatzTresor v1.5.5 — Electron Preload Script
+ * SatzTresor v1.5.6 — Electron Preload Script
  * Secure IPC Bridge between Renderer UI and Main Process.
  */
 
