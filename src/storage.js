@@ -1,5 +1,5 @@
 /**
- * SatzTresor v1.5.6 — Storage & INI Database Engine
+ * SnapPhrase v1.6.0 — Storage & INI Database Engine
  * Handles atomic file operations, smart hash-verified rolling backups, INI serialization,
  * AES-256-CBC database encryption (lock & password change), JSON/CSV/INI import/export,
  * debounced usage persistence, and application settings.
@@ -10,11 +10,13 @@ const path = require('path');
 const crypto = require('crypto');
 const AES256 = require('./crypto');
 
-const SETTINGS_SECTION = '__SatzTresorSettings__';
+const SETTINGS_SECTION = '__SnapPhraseSettings__';
+const LEGACY_ST_SECTION = '__SatzTresorSettings__';
 const LEGACY_QT_SECTION = '__QuickTabSettings__';
 const LEGACY_SECTION = '__TabsmartSettings__';
 
 const UI_SETTING_KEYS = [
+  'Language',
   'LayoutMode',
   'IsPinned',
   'SidebarWidth',
@@ -36,6 +38,7 @@ const UI_SETTING_KEYS = [
 
 // Non-sensitive UI appearance & trigger preferences cached locally so encrypted/locked startup never flashes or jumps
 const PERSISTED_UI_PREF_KEYS = [
+  'Language',
   'Theme',
   'BackdropMode',
   'BackdropBlurPercent',
@@ -99,10 +102,12 @@ function repairLegacyLeakedMetadata(rawContent, sectionMap = null) {
 }
 
 class Storage {
-  constructor(filePath) {
+  constructor(filePath, options = {}) {
     this.filePath = filePath;
+    this.systemLocale = String(options.systemLocale || '');
     this.backupDir = path.join(path.dirname(filePath), 'backups');
-    this.uiPrefsPath = path.join(path.dirname(filePath), 'satztresor-ui.json');
+    this.uiPrefsPath = path.join(path.dirname(filePath), 'snapphrase-ui.json');
+    this.legacyUiPrefsPath = path.join(path.dirname(filePath), 'satztresor-ui.json');
     this.data = new Map(); // Section -> Map(Key -> Value)
     this.cachedSettings = new Map(); // Preserves UI layout/theme settings while locked
     this.isEncrypted = false;
@@ -116,8 +121,13 @@ class Storage {
 
   _loadPersistedUiPrefs() {
     try {
-      if (!fs.existsSync(this.uiPrefsPath)) return;
-      const parsed = JSON.parse(fs.readFileSync(this.uiPrefsPath, 'utf8'));
+      const targetPath = fs.existsSync(this.uiPrefsPath)
+        ? this.uiPrefsPath
+        : fs.existsSync(this.legacyUiPrefsPath)
+          ? this.legacyUiPrefsPath
+          : null;
+      if (!targetPath) return;
+      const parsed = JSON.parse(fs.readFileSync(targetPath, 'utf8'));
       if (!parsed || typeof parsed !== 'object') return;
       for (const key of PERSISTED_UI_PREF_KEYS) {
         if (typeof parsed[key] === 'string') {
@@ -205,13 +215,23 @@ class Storage {
 
     const raw = fs.readFileSync(this.filePath, 'utf8');
 
-    if (raw.startsWith('STENC2:') || raw.startsWith('QTENC2:') || raw.startsWith('TSENC2:')) {
+    if (
+      raw.startsWith('SPENC2:') ||
+      raw.startsWith('STENC2:') ||
+      raw.startsWith('QTENC2:') ||
+      raw.startsWith('TSENC2:')
+    ) {
       this.isEncrypted = true;
       this.isLocked = true;
       this.encryptionVersion = 2;
       this.rawCipher = raw.substring(7).trim();
       this._applyStartupCenterLayout();
-    } else if (raw.startsWith('STENC:') || raw.startsWith('QTENC:') || raw.startsWith('TSENC:')) {
+    } else if (
+      raw.startsWith('SPENC:') ||
+      raw.startsWith('STENC:') ||
+      raw.startsWith('QTENC:') ||
+      raw.startsWith('TSENC:')
+    ) {
       this.isEncrypted = true;
       this.isLocked = true;
       this.encryptionVersion = 1;
@@ -241,30 +261,56 @@ class Storage {
       this.data.set(title, map);
     };
 
-    addSnippet(
-      'Mit freundlichen Grüßen',
-      'mfg',
-      'E-Mail',
-      'Mit freundlichen Grüßen,\n{cursor}',
-      '1'
-    );
-    addSnippet(
-      'Terminbestätigung',
-      'termin',
-      'E-Mail',
-      'Sehr geehrte/r {?Anrede=Frau|Herr|Guten Tag} {?Name},\n\nvielen Dank für das Gespräch. Hiermit bestätige ich unseren Termin am {?Datum} um {?Uhrzeit} Uhr.\n\nMit freundlichen Grüßen,\n{cursor}',
-      '1'
-    );
-    addSnippet(
-      'Standard-Signatur',
-      'sig',
-      'Signatur',
-      'Dein Name\nTelefon: +49 123 456789\nE-Mail: name@beispiel.de',
-      '0'
-    );
+    const isEn = this.getEffectiveLanguage() === 'en';
+    if (isEn) {
+      addSnippet(
+        'Best regards',
+        'br',
+        'Email',
+        'Best regards,\n{cursor}',
+        '1'
+      );
+      addSnippet(
+        'Meeting confirmation',
+        'meet',
+        'Email',
+        'Hi {?Name},\n\nThank you for reaching out. I am happy to confirm our meeting on {?Date} at {?Time}.\n\nBest regards,\n{cursor}',
+        '1'
+      );
+      addSnippet(
+        'Standard signature',
+        'sig',
+        'Signature',
+        'Your Name\nPhone: +1 (555) 123-4567\nEmail: name@example.com',
+        '0'
+      );
+    } else {
+      addSnippet(
+        'Mit freundlichen Grüßen',
+        'mfg',
+        'E-Mail',
+        'Mit freundlichen Grüßen,\n{cursor}',
+        '1'
+      );
+      addSnippet(
+        'Terminbestätigung',
+        'termin',
+        'E-Mail',
+        'Sehr geehrte/r {?Anrede=Frau|Herr|Guten Tag} {?Name},\n\nvielen Dank für das Gespräch. Hiermit bestätige ich unseren Termin am {?Datum} um {?Uhrzeit} Uhr.\n\nMit freundlichen Grüßen,\n{cursor}',
+        '1'
+      );
+      addSnippet(
+        'Standard-Signatur',
+        'sig',
+        'Signatur',
+        'Dein Name\nTelefon: +49 123 456789\nE-Mail: name@beispiel.de',
+        '0'
+      );
+    }
 
     // Default settings for fresh installations
     const settings = new Map();
+    settings.set('Language', 'auto');
     settings.set('LayoutMode', 'center');
     settings.set('BackdropMode', 'blur');
     settings.set('BackdropBlurPercent', '65');
@@ -297,6 +343,9 @@ class Storage {
   _readRawSetting(key) {
     if (this.data.has(SETTINGS_SECTION) && this.data.get(SETTINGS_SECTION).has(key)) {
       return this.data.get(SETTINGS_SECTION).get(key);
+    }
+    if (this.data.has(LEGACY_ST_SECTION) && this.data.get(LEGACY_ST_SECTION).has(key)) {
+      return this.data.get(LEGACY_ST_SECTION).get(key);
     }
     if (this.data.has(LEGACY_QT_SECTION) && this.data.get(LEGACY_QT_SECTION).has(key)) {
       return this.data.get(LEGACY_QT_SECTION).get(key);
@@ -361,26 +410,29 @@ class Storage {
     if (!this.isEncrypted || !this.isLocked) {
       return { success: true };
     }
+    const isEn = this.getEffectiveLanguage() === 'en';
+    const wrongPwMsg = isEn ? 'Incorrect master password!' : 'Falsches Master-Passwort!';
 
     try {
       const decrypted = AES256.decrypt(this.rawCipher, password, this.encryptionVersion);
+      const isSnapPhrase = decrypted.startsWith('SnapPhraseVerifiedMasterKey:');
       const isSatzTresor = decrypted.startsWith('SatzTresorVerifiedMasterKey:');
       const isQuickTab = decrypted.startsWith('QuickTabVerifiedMasterKey:');
       const isTabsmart = decrypted.startsWith('TabsmartVerifiedMasterKey:');
 
-      if (!isSatzTresor && !isQuickTab && !isTabsmart) {
-        return { success: false, error: 'Falsches Master-Passwort!' };
+      if (!isSnapPhrase && !isSatzTresor && !isQuickTab && !isTabsmart) {
+        return { success: false, error: wrongPwMsg };
       }
 
       this.masterPassword = password;
       this.isLocked = false;
 
-      const prefixLen = isSatzTresor ? 28 : 26;
+      const prefixLen = isSnapPhrase || isSatzTresor ? 28 : 26;
       const plainIni = decrypted.substring(prefixLen);
       const shouldEnforceCenter = this._enforceStartupCenterPending;
       this.parseIni(plainIni);
 
-      let needsSave = this.encryptionVersion !== 2 || !isSatzTresor;
+      let needsSave = this.encryptionVersion !== 2 || (!isSnapPhrase && !isSatzTresor);
       if (shouldEnforceCenter) {
         if (this._applyStartupCenterLayout()) {
           needsSave = true;
@@ -389,20 +441,22 @@ class Storage {
         this._syncCachedSettings();
       }
 
-      // Upgrade legacy encryption to STENC2 or persist startup center alignment
       if (needsSave) {
         this.encryptionVersion = 2;
         this.save();
       }
       return { success: true };
     } catch (err) {
-      return { success: false, error: 'Falsches Master-Passwort!' };
+      return { success: false, error: wrongPwMsg };
     }
   }
 
   lock() {
     if (!this.isEncrypted) {
-      return { success: false, error: 'Datenbank ist nicht verschlüsselt.' };
+      return {
+        success: false,
+        error: this.getEffectiveLanguage() === 'en' ? 'Database is not encrypted.' : 'Datenbank ist nicht verschlüsselt.',
+      };
     }
     if (this.isLocked) {
       return { success: true };
@@ -417,14 +471,24 @@ class Storage {
   }
 
   changePassword(currentPassword, newPassword) {
+    const isEn = this.getEffectiveLanguage() === 'en';
     if (!this.isEncrypted || this.isLocked) {
-      return { success: false, error: 'Datenbank muss entsperrt und verschlüsselt sein.' };
+      return {
+        success: false,
+        error: isEn ? 'Database must be unlocked and encrypted.' : 'Datenbank muss entsperrt und verschlüsselt sein.',
+      };
     }
     if (!currentPassword || currentPassword !== this.masterPassword) {
-      return { success: false, error: 'Aktuelles Master-Passwort ist falsch!' };
+      return {
+        success: false,
+        error: isEn ? 'Current master password is incorrect!' : 'Aktuelles Master-Passwort ist falsch!',
+      };
     }
     if (!newPassword || newPassword.length < 1) {
-      return { success: false, error: 'Neues Passwort darf nicht leer sein!' };
+      return {
+        success: false,
+        error: isEn ? 'New password cannot be empty!' : 'Neues Passwort darf nicht leer sein!',
+      };
     }
 
     this.masterPassword = newPassword;
@@ -534,8 +598,8 @@ class Storage {
     let fileContent = plain;
 
     if (this.isEncrypted && this.masterPassword) {
-      const cipher = AES256.encrypt('SatzTresorVerifiedMasterKey:' + plain, this.masterPassword);
-      fileContent = 'STENC2:' + cipher;
+      const cipher = AES256.encrypt('SnapPhraseVerifiedMasterKey:' + plain, this.masterPassword);
+      fileContent = 'SPENC2:' + cipher;
       this.rawCipher = cipher;
     }
 
@@ -571,7 +635,12 @@ class Storage {
   }
 
   isReservedSection(name) {
-    return name === SETTINGS_SECTION || name === LEGACY_QT_SECTION || name === LEGACY_SECTION;
+    return (
+      name === SETTINGS_SECTION ||
+      name === LEGACY_ST_SECTION ||
+      name === LEGACY_QT_SECTION ||
+      name === LEGACY_SECTION
+    );
   }
 
   hasSnippet(title) {
@@ -685,11 +754,12 @@ class Storage {
     const cleanTitle = (title || '').trim();
     if (!cleanTitle || !this.data.has(cleanTitle)) return null;
 
+    const copyWord = this.getEffectiveLanguage() === 'en' ? 'Copy' : 'Kopie';
     const source = this.data.get(cleanTitle);
-    let newTitle = `${cleanTitle} (Kopie)`;
+    let newTitle = `${cleanTitle} (${copyWord})`;
     let counter = 2;
     while (this.data.has(newTitle)) {
-      newTitle = `${cleanTitle} (Kopie ${counter})`;
+      newTitle = `${cleanTitle} (${copyWord} ${counter})`;
       counter++;
     }
 
@@ -875,6 +945,35 @@ class Storage {
     this.setSetting('Theme', theme);
   }
 
+  getLanguage() {
+    const raw = String(this.getSetting('Language', 'auto') || 'auto').toLowerCase().trim();
+    if (raw === 'de' || raw === 'en' || raw === 'auto') return raw;
+    return 'auto';
+  }
+
+  setLanguage(lang) {
+    const raw = String(lang || 'auto').toLowerCase().trim();
+    const clean = raw === 'de' || raw === 'en' ? raw : 'auto';
+    this.setSetting('Language', clean);
+    return clean;
+  }
+
+  setSystemLocale(localeStr) {
+    this.systemLocale = String(localeStr || '');
+  }
+
+  getEffectiveLanguage(localeOverride = '') {
+    const pref = this.getLanguage();
+    if (pref === 'de' || pref === 'en') return pref;
+    let sys = String(localeOverride || this.systemLocale || '').toLowerCase();
+    if (!sys) {
+      try {
+        sys = String(Intl.DateTimeFormat().resolvedOptions().locale || '').toLowerCase();
+      } catch (e) {}
+    }
+    return sys.startsWith('de') ? 'de' : 'en';
+  }
+
   getHotstringsEnabled() {
     return this.getSetting('HotstringsEnabled', '1') === '1';
   }
@@ -953,6 +1052,8 @@ class Storage {
     this.encryptionVersion = 2;
 
     // Purge unencrypted plaintext backups for security
+    const isEncryptedHead = (h) =>
+      h.startsWith('SPENC') || h.startsWith('STENC') || h.startsWith('QTENC') || h.startsWith('TSENC');
     try {
       if (fs.existsSync(this.backupDir)) {
         const files = fs.readdirSync(this.backupDir);
@@ -960,7 +1061,7 @@ class Storage {
           const p = path.join(this.backupDir, f);
           try {
             const head = fs.readFileSync(p, 'utf8').substring(0, 10);
-            if (!head.startsWith('STENC') && !head.startsWith('QTENC') && !head.startsWith('TSENC')) {
+            if (!isEncryptedHead(head)) {
               fs.unlinkSync(p);
             }
           } catch (e) {}
@@ -968,7 +1069,7 @@ class Storage {
       }
       if (fs.existsSync(this.filePath + '.bak')) {
         const bakHead = fs.readFileSync(this.filePath + '.bak', 'utf8').substring(0, 10);
-        if (!bakHead.startsWith('STENC') && !bakHead.startsWith('QTENC') && !bakHead.startsWith('TSENC')) {
+        if (!isEncryptedHead(bakHead)) {
           fs.unlinkSync(this.filePath + '.bak');
         }
       }
@@ -1049,8 +1150,12 @@ class Storage {
   }
 
   importSnippets(sourcePath) {
+    const isEn = this.getEffectiveLanguage() === 'en';
     if (this.isLocked) {
-      return { success: false, error: 'Bitte entsperre SatzTresor zuerst.' };
+      return {
+        success: false,
+        error: isEn ? 'Please unlock SnapPhrase first.' : 'Bitte entsperre SnapPhrase zuerst.',
+      };
     }
     const ext = path.extname(sourcePath).toLowerCase();
     if (ext === '.json') {
@@ -1063,15 +1168,19 @@ class Storage {
     try {
       const raw = fs.readFileSync(sourcePath, 'utf8');
       if (
+        raw.startsWith('SPENC2:') ||
         raw.startsWith('STENC2:') ||
         raw.startsWith('QTENC2:') ||
         raw.startsWith('TSENC2:') ||
+        raw.startsWith('SPENC:') ||
         raw.startsWith('STENC:') ||
         raw.startsWith('QTENC:') ||
         raw.startsWith('TSENC:')
       ) {
         throw new Error(
-          'Diese Datei ist mit einem Master-Passwort verschlüsselt. Bitte exportiere die Bausteine zuerst im entsperrten SatzTresor über „Exportieren“.'
+          isEn
+            ? 'This file is encrypted with a master password. Please export the snippets from an unlocked SnapPhrase instance via "Export" first.'
+            : 'Diese Datei ist mit einem Master-Passwort verschlüsselt. Bitte exportiere die Bausteine zuerst im entsperrten SnapPhrase über „Exportieren“.'
         );
       }
       const tempStorage = new Storage(sourcePath);

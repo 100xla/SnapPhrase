@@ -1,8 +1,8 @@
 {
-  "name": "satztresor",
-  "version": "1.5.6",
-  "description": "SatzTresor v1.5.6 — Moderner, lokaler Satzbaustein-Manager mit AES-256-Verschlüsselung & automatischer Textersetzung",
-  "author": "SatzTresor Project",
+  "name": "snapphrase",
+  "version": "1.6.0",
+  "description": "SnapPhrase v1.6.0 — Fast, local, AES-256 encrypted text expander and snippet manager for Windows",
+  "author": "SnapPhrase Project",
   "license": "MIT",
   "main": "src/main.js",
   "scripts": {
@@ -27,14 +27,14 @@
     "electron-builder": "^26.15.3"
   },
   "build": {
-    "appId": "de.satztresor.app",
-    "productName": "SatzTresor",
-    "copyright": "Copyright © 2026 SatzTresor Project",
+    "appId": "com.snapphrase.app",
+    "productName": "SnapPhrase",
+    "copyright": "Copyright © 2026 SnapPhrase Project",
     "publish": [
       {
         "provider": "github",
         "owner": "100xla",
-        "repo": "satztresor",
+        "repo": "SnapPhrase",
         "releaseType": "release"
       }
     ],
@@ -45,6 +45,8 @@
     "files": [
       "src/**/*",
       "ui/**/*",
+      "snapphrase.ico",
+      "snapphrase.png",
       "satztresor.ico",
       "satztresor.png",
       "logo.png",
@@ -52,7 +54,7 @@
     ],
     "asar": true,
     "extraResources": [
-      "satztresor.ico"
+      "snapphrase.ico"
     ],
     "asarUnpack": [
       "**/*.node",
@@ -82,7 +84,7 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "SatzTresor",
+      "shortcutName": "SnapPhrase",
       "deleteAppDataOnUninstall": false
     },
     "portable": {
@@ -90,12 +92,12 @@
     },
     "appx": {
       "artifactName": "${productName}-Store-${version}.${ext}",
-      "applicationId": "SatzTresor",
-      "identityName": "SatzTresor.App",
+      "applicationId": "SnapPhrase",
+      "identityName": "SnapPhrase.App",
       "publisher": "CN=00000000-0000-0000-0000-000000000000",
-      "publisherDisplayName": "SatzTresor",
-      "displayName": "SatzTresor - Satzbaustein-Manager",
-      "backgroundColor": "#18181b",
+      "publisherDisplayName": "SnapPhrase",
+      "displayName": "SnapPhrase - Text Expander and Snippet Vault",
+      "backgroundColor": "#12131a",
       "showNameOnTiles": true,
       "addAutoLaunchExtension": true
     }

@@ -1,5 +1,6 @@
 /**
- * SatzTresor v1.5.6 — Automatic Update Engine (GitHub Releases + Delta Updates + Self-Update)
+ * SnapPhrase v1.6.0 — Automatic Update Engine (GitHub Releases + Delta Updates + Self-Update)
+ * - Microsoft Store builds (process.windowsStore): Self-updater disabled; managed natively by Microsoft Store.
  * - Installed NSIS builds: Silent background delta-downloads (.blockmap + SHA-512 verification)
  *   via electron-updater, installable with 1 click or automatically on next app quit,
  *   plus automatic direct-download silent installer (/S) fallback.
@@ -15,7 +16,7 @@ const { spawn } = require('child_process');
 
 const INITIAL_CHECK_DELAY_MS = 8000;
 const PERIODIC_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000; // 4 hours
-const DEFAULT_GITHUB_REPO = '100xla/satztresor';
+const DEFAULT_GITHUB_REPO = '100xla/SnapPhrase';
 const PLACEHOLDER_OWNERS = new Set(['', 'dein-github-name', '<dein_github_name>', 'your-github-username']);
 
 function parseSemverParts(versionStr) {
@@ -66,7 +67,7 @@ function fetchLatestGitHubRelease(owner, repo, currentVersion) {
         method: 'GET',
         headers: {
           Accept: 'application/vnd.github+json',
-          'User-Agent': `SatzTresor/${currentVersion}`,
+          'User-Agent': `SnapPhrase/${currentVersion}`,
         },
         timeout: 12000,
       },
@@ -86,14 +87,14 @@ function fetchLatestGitHubRelease(owner, repo, currentVersion) {
           try {
             resolve(JSON.parse(body));
           } catch (err) {
-            reject(new Error('Ungültige Antwort von GitHub Releases'));
+            reject(new Error('Invalid response from GitHub Releases'));
           }
         });
       }
     );
 
     req.on('timeout', () => {
-      req.destroy(new Error('Zeitüberschreitung bei der Update-Prüfung'));
+      req.destroy(new Error('Update check timed out'));
     });
     req.on('error', (err) => reject(err));
     req.end();
@@ -107,7 +108,7 @@ function downloadFileWithRedirects(url, destPath, onProgress, maxRedirects = 6) 
       try {
         parsedUrl = new URL(targetUrl);
       } catch (err) {
-        return reject(new Error('Ungültige Download-URL'));
+        return reject(new Error('Invalid download URL'));
       }
 
       const req = https.get(
@@ -115,7 +116,7 @@ function downloadFileWithRedirects(url, destPath, onProgress, maxRedirects = 6) 
           hostname: parsedUrl.hostname,
           path: parsedUrl.pathname + parsedUrl.search,
           headers: {
-            'User-Agent': 'SatzTresor-Updater',
+            'User-Agent': 'SnapPhrase-Updater',
             Accept: 'application/octet-stream,*/*',
           },
           timeout: 30000,
@@ -157,7 +158,7 @@ function downloadFileWithRedirects(url, destPath, onProgress, maxRedirects = 6) 
                 try {
                   fs.unlinkSync(destPath);
                 } catch (e) {}
-                return reject(new Error('Heruntergeladene Datei ist unvollständig'));
+                return reject(new Error('Downloaded file is incomplete'));
               }
               resolve(destPath);
             });
@@ -173,7 +174,7 @@ function downloadFileWithRedirects(url, destPath, onProgress, maxRedirects = 6) 
       );
 
       req.on('timeout', () => {
-        req.destroy(new Error('Zeitüberschreitung beim Update-Download'));
+        req.destroy(new Error('Update download timed out'));
       });
       req.on('error', (err) => {
         try {
@@ -187,7 +188,7 @@ function downloadFileWithRedirects(url, destPath, onProgress, maxRedirects = 6) 
   });
 }
 
-class SatzTresorUpdater {
+class SnapPhraseUpdater {
   constructor({ app, shell, storage, currentVersion, onStateChange, onToast, onBeforeQuitAndInstall }) {
     this.app = app;
     this.shell = shell;
@@ -200,10 +201,13 @@ class SatzTresorUpdater {
 
     this.defaultRepoSlug = readDefaultRepoFromPackageJson();
     this.isPackaged = Boolean(app && app.isPackaged);
+    this.isWindowsStore = Boolean(process.windowsStore);
     this.isPortable = Boolean(
       process.env.PORTABLE_EXECUTABLE_FILE || process.env.PORTABLE_EXECUTABLE_DIR
     );
-    this.mockMode = String(process.env.SATZTRESOR_MOCK_UPDATE || '').trim();
+    this.mockMode = String(
+      process.env.SNAPPHRASE_MOCK_UPDATE || process.env.SATZTRESOR_MOCK_UPDATE || ''
+    ).trim();
 
     this.autoUpdater = null;
     this.isChecking = false;
@@ -217,7 +221,7 @@ class SatzTresorUpdater {
     this.usedElectronUpdaterForCurrentDownload = false;
 
     this.state = {
-      status: 'idle', // 'idle' | 'unconfigured' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'portable-available' | 'up-to-date' | 'error'
+      status: this.isWindowsStore ? 'store-managed' : 'idle',
       currentVersion: this.currentVersion,
       availableVersion: null,
       percent: 0,
@@ -230,8 +234,21 @@ class SatzTresorUpdater {
     this._refreshConfigurationStatus();
   }
 
+  _isEn() {
+    try {
+      return this.storage && typeof this.storage.getEffectiveLanguage === 'function'
+        ? this.storage.getEffectiveLanguage() === 'en'
+        : false;
+    } catch (e) {
+      return false;
+    }
+  }
+
   getEffectiveRepoSlug() {
     const custom = this.storage.getUpdateRepo();
+    if (custom && custom.toLowerCase() === '100xla/satztresor') {
+      return DEFAULT_GITHUB_REPO;
+    }
     return custom || this.defaultRepoSlug || DEFAULT_GITHUB_REPO;
   }
 
@@ -245,6 +262,11 @@ class SatzTresorUpdater {
   }
 
   _refreshConfigurationStatus() {
+    if (this.isWindowsStore) {
+      this.state.status = 'store-managed';
+      this.state.errorMessage = null;
+      return;
+    }
     if (this.mockMode) return;
     const parsed = this.getParsedRepo();
     if (!parsed) {
@@ -265,7 +287,7 @@ class SatzTresorUpdater {
   }
 
   _initUpdaterInstance() {
-    if (!this.isPackaged || this.isPortable || this.mockMode) {
+    if (!this.isPackaged || this.isPortable || this.isWindowsStore || this.mockMode) {
       return;
     }
 
@@ -284,7 +306,6 @@ class SatzTresorUpdater {
       autoUpdater.allowDowngrade = false;
       autoUpdater.autoDownload = this.storage.getAutoUpdateEnabled();
       autoUpdater.autoInstallOnAppQuit = true;
-      // Preserve HTTPS + SHA-512 hash verification from latest.yml without requiring paid Authenticode cert
       autoUpdater.verifyUpdateCodeSignature = async () => null;
 
       autoUpdater.on('checking-for-update', () => {
@@ -306,7 +327,9 @@ class SatzTresorUpdater {
           lastCheckedAt: Date.now(),
         });
         if (this.lastManualCheck && !willAutoDownload && nextVersion) {
-          this.onToast(`Update v${nextVersion} verfügbar`);
+          this.onToast(
+            this._isEn() ? `Update v${nextVersion} available` : `Update v${nextVersion} verfügbar`
+          );
         }
       });
 
@@ -320,7 +343,11 @@ class SatzTresorUpdater {
           lastCheckedAt: Date.now(),
         });
         if (this.lastManualCheck) {
-          this.onToast(`✓ SatzTresor v${this.currentVersion} ist aktuell`);
+          this.onToast(
+            this._isEn()
+              ? `✓ SnapPhrase v${this.currentVersion} is up to date`
+              : `✓ SnapPhrase v${this.currentVersion} ist aktuell`
+          );
           this.lastManualCheck = false;
         }
       });
@@ -349,7 +376,11 @@ class SatzTresorUpdater {
           lastCheckedAt: Date.now(),
         });
         if (this.lastManualCheck) {
-          this.onToast(`✓ Update v${nextVersion} bereit zum Neustart`);
+          this.onToast(
+            this._isEn()
+              ? `✓ Update v${nextVersion} ready to restart`
+              : `✓ Update v${nextVersion} bereit zum Neustart`
+          );
           this.lastManualCheck = false;
         }
       });
@@ -357,17 +388,23 @@ class SatzTresorUpdater {
       autoUpdater.on('error', (err) => {
         const parsed = this.getParsedRepo();
         if (parsed && !this.isDirectDownloading) {
-          // Seamlessly fall back to direct GitHub Releases check + download
           this._checkDirectGitHubRelease(parsed, this.lastManualCheck).catch(() => {});
           return;
         }
         this.isChecking = false;
-        const rawMsg = String(err?.message || err || 'Unbekannter Update-Fehler');
+        const rawMsg = String(err?.message || err || '');
+        const en = this._isEn();
         const friendlyMsg = rawMsg.includes('404')
-          ? 'Noch kein veröffentlichtes Release auf GitHub gefunden.'
+          ? en
+            ? 'No published release found on GitHub yet.'
+            : 'Noch kein veröffentlichtes Release auf GitHub gefunden.'
           : rawMsg.includes('ERR_INTERNET_DISCONNECTED') || rawMsg.includes('ENOTFOUND')
-            ? 'Keine Internetverbindung für Update-Prüfung.'
-            : 'Update-Prüfung fehlgeschlagen.';
+            ? en
+              ? 'No internet connection for update check.'
+              : 'Keine Internetverbindung für Update-Prüfung.'
+            : en
+              ? 'Update check failed.'
+              : 'Update-Prüfung fehlgeschlagen.';
         this._setState({
           status: 'error',
           errorMessage: friendlyMsg,
@@ -392,15 +429,17 @@ class SatzTresorUpdater {
     return {
       ...this.state,
       currentVersion: this.currentVersion,
-      autoUpdateEnabled: this.storage.getAutoUpdateEnabled(),
+      autoUpdateEnabled: this.isWindowsStore ? true : this.storage.getAutoUpdateEnabled(),
       repoSlug: parsed ? parsed.slug : '',
       isConfigured: Boolean(parsed) || Boolean(this.mockMode),
       isPortable: this.isPortable,
       isPackaged: this.isPackaged,
+      isWindowsStore: this.isWindowsStore,
     };
   }
 
   setAutoUpdateEnabled(enabled) {
+    if (this.isWindowsStore) return;
     const flag = Boolean(enabled);
     this.storage.setAutoUpdateEnabled(flag);
     if (this.autoUpdater) {
@@ -425,6 +464,7 @@ class SatzTresorUpdater {
 
   startSchedule() {
     this.stopSchedule();
+    if (this.isWindowsStore) return;
 
     if (this.mockMode) {
       this.initialTimer = setTimeout(() => {
@@ -467,6 +507,7 @@ class SatzTresorUpdater {
 
   async _checkDirectGitHubRelease(parsed, manual = false) {
     this._setState({ status: 'checking', errorMessage: null });
+    const en = this._isEn();
     try {
       const release = await fetchLatestGitHubRelease(parsed.owner, parsed.repo, this.currentVersion);
       this.isChecking = false;
@@ -477,7 +518,11 @@ class SatzTresorUpdater {
           errorMessage: null,
         });
         if (manual) {
-          this.onToast('Noch kein veröffentlichtes Release auf GitHub gefunden.');
+          this.onToast(
+            en
+              ? 'No published release found on GitHub yet.'
+              : 'Noch kein veröffentlichtes Release auf GitHub gefunden.'
+          );
           this.lastManualCheck = false;
         }
         return;
@@ -519,7 +564,7 @@ class SatzTresorUpdater {
           if (this.storage.getAutoUpdateEnabled()) {
             await this._downloadDirectAsset(downloadUrl, remoteVersion);
           } else if (manual) {
-            this.onToast(`Update v${remoteVersion} verfügbar!`);
+            this.onToast(en ? `Update v${remoteVersion} available!` : `Update v${remoteVersion} verfügbar!`);
             this.lastManualCheck = false;
           }
         } else {
@@ -532,7 +577,9 @@ class SatzTresorUpdater {
             lastCheckedAt: Date.now(),
           });
           if (manual) {
-            this.onToast(`Update v${remoteVersion} auf GitHub verfügbar!`);
+            this.onToast(
+              en ? `Update v${remoteVersion} available on GitHub!` : `Update v${remoteVersion} auf GitHub verfügbar!`
+            );
             this.lastManualCheck = false;
           }
         }
@@ -546,13 +593,17 @@ class SatzTresorUpdater {
           lastCheckedAt: Date.now(),
         });
         if (manual) {
-          this.onToast(`✓ SatzTresor v${this.currentVersion} ist aktuell`);
+          this.onToast(
+            en
+              ? `✓ SnapPhrase v${this.currentVersion} is up to date`
+              : `✓ SnapPhrase v${this.currentVersion} ist aktuell`
+          );
           this.lastManualCheck = false;
         }
       }
     } catch (err) {
       this.isChecking = false;
-      const msg = err?.message || 'Update-Prüfung fehlgeschlagen.';
+      const msg = err?.message || (en ? 'Update check failed.' : 'Update-Prüfung fehlgeschlagen.');
       this._setState({
         status: 'error',
         errorMessage: msg,
@@ -568,6 +619,7 @@ class SatzTresorUpdater {
     if (this.isDirectDownloading || !downloadUrl) return;
     this.isDirectDownloading = true;
     this.usedElectronUpdaterForCurrentDownload = false;
+    const en = this._isEn();
 
     const targetDir =
       this.directDownloadedMode === 'portable' && process.env.PORTABLE_EXECUTABLE_DIR
@@ -575,8 +627,8 @@ class SatzTresorUpdater {
         : os.tmpdir();
     const fileName =
       this.directDownloadedMode === 'portable'
-        ? `SatzTresor-Portable-${version}.update.exe`
-        : `SatzTresor-Setup-${version}.update.exe`;
+        ? `SnapPhrase-Portable-${version}.update.exe`
+        : `SnapPhrase-Setup-${version}.update.exe`;
     const destPath = path.join(targetDir, fileName);
 
     this._setState({
@@ -608,23 +660,37 @@ class SatzTresorUpdater {
         lastCheckedAt: Date.now(),
       });
       if (this.lastManualCheck) {
-        this.onToast(`✓ Update v${version} bereit zum Neustart`);
+        this.onToast(
+          en ? `✓ Update v${version} ready to restart` : `✓ Update v${version} bereit zum Neustart`
+        );
         this.lastManualCheck = false;
       }
     } catch (err) {
       this.isDirectDownloading = false;
       this._setState({
         status: 'error',
-        errorMessage: err?.message || 'Update-Download fehlgeschlagen.',
+        errorMessage: err?.message || (en ? 'Update download failed.' : 'Update-Download fehlgeschlagen.'),
       });
       if (this.lastManualCheck) {
-        this.onToast('Update-Download fehlgeschlagen.');
+        this.onToast(en ? 'Update download failed.' : 'Update-Download fehlgeschlagen.');
         this.lastManualCheck = false;
       }
     }
   }
 
   async checkForUpdates({ manual = false } = {}) {
+    if (this.isWindowsStore) {
+      this._setState({ status: 'store-managed', errorMessage: null });
+      if (manual) {
+        this.onToast(
+          this._isEn()
+            ? '✓ Updates are managed automatically via Microsoft Store'
+            : '✓ Updates erfolgen automatisch über den Microsoft Store'
+        );
+      }
+      return;
+    }
+
     if (this.isChecking || this.isDirectDownloading) return;
 
     // Deterministic E2E / UI test simulation mode
@@ -661,14 +727,22 @@ class SatzTresorUpdater {
         errorMessage: null,
       });
       if (manual) {
-        this.onToast('Bitte zuerst ein GitHub-Repository (z. B. 100xla/satztresor) hinterlegen.');
+        this.onToast(
+          this._isEn()
+            ? 'Please configure a GitHub repository (e.g. 100xla/SnapPhrase) first.'
+            : 'Bitte zuerst ein GitHub-Repository (z. B. 100xla/SnapPhrase) hinterlegen.'
+        );
       }
       return;
     }
 
     if (this.state.status === 'downloaded') {
       if (manual) {
-        this.onToast(`✓ Update v${this.state.availableVersion} ist bereits bereit zum Neustart`);
+        this.onToast(
+          this._isEn()
+            ? `✓ Update v${this.state.availableVersion} is already ready to restart`
+            : `✓ Update v${this.state.availableVersion} ist bereits bereit zum Neustart`
+        );
       }
       return;
     }
@@ -767,7 +841,9 @@ class SatzTresorUpdater {
 
   installNow() {
     if (this.mockMode && this.state.status === 'downloaded') {
-      this.onToast('Simulierter Update-Neustart ausgelöst');
+      this.onToast(
+        this._isEn() ? 'Simulated update restart triggered' : 'Simulierter Update-Neustart ausgelöst'
+      );
       return true;
     }
 
@@ -792,7 +868,6 @@ class SatzTresorUpdater {
         this.onBeforeQuitAndInstall();
         setImmediate(() => {
           try {
-            // isSilent = true (/S), isForceRunAfter = true (--force-run)
             this.autoUpdater.quitAndInstall(true, true);
           } catch (err) {
             console.error('[Updater] quitAndInstall failed:', err);
@@ -802,13 +877,13 @@ class SatzTresorUpdater {
         return true;
       }
     }
-
     return false;
   }
 }
 
 module.exports = {
-  SatzTresorUpdater,
+  SnapPhraseUpdater,
+  SatzTresorUpdater: SnapPhraseUpdater,
   compareSemver,
   parseSemverParts,
 };

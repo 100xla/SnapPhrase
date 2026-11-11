@@ -1,6 +1,6 @@
 /**
- * Configure GitHub Repository for SatzTresor Auto-Updates
- * Usage: npm run repo -- deinname/satztresor
+ * Configure GitHub Repository for SnapPhrase Auto-Updates
+ * Usage: npm run repo -- 100xla/SnapPhrase
  */
 
 const fs = require('fs');
@@ -14,8 +14,8 @@ const raw = String(process.argv[2] || '')
 
 const parts = raw.split('/').filter(Boolean);
 if (parts.length !== 2) {
-  console.error('Verwendung: npm run repo -- <github-name>/<repository>');
-  console.error('Beispiel:   npm run repo -- xavi/satztresor');
+  console.error('Usage:   npm run repo -- <github-owner>/<repository>');
+  console.error('Example: npm run repo -- 100xla/SnapPhrase');
   process.exit(1);
 }
 
@@ -34,4 +34,4 @@ pkg.build.publish = [
 ];
 
 fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n', 'utf8');
-console.log(`[SatzTresor Repo] Update-Quelle in package.json gesetzt auf: ${owner}/${repo}`);
+console.log(`[SnapPhrase Repo] Update target in package.json set to: ${owner}/${repo}`);

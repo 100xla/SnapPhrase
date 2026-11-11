@@ -1,5 +1,5 @@
 /**
- * SatzTresor Version Synchronizer
+ * SnapPhrase Version Synchronizer
  * Usage:
  *   node build/bump-version.js 1.6.0
  *   node build/bump-version.js patch | minor | major
@@ -28,7 +28,7 @@ function computeNextVersion(cur, bumpArg) {
   if (bumpArg === 'major') return `${parts[0] + 1}.0.0`;
   const clean = bumpArg.replace(/^v/i, '');
   if (!/^\d+\.\d+\.\d+$/.test(clean)) {
-    throw new Error(`Invalid version "${bumpArg}". Expected semver like 1.5.0 or patch/minor/major.`);
+    throw new Error(`Invalid version "${bumpArg}". Expected semver like 1.6.0 or patch/minor/major.`);
   }
   return clean;
 }
@@ -37,15 +37,17 @@ const nextVersion = computeNextVersion(currentVersion, arg);
 
 // 1. Update package.json & package-lock.json top-level version
 pkg.version = nextVersion;
-pkg.description = pkg.description.replace(/SatzTresor v\d+\.\d+\.\d+/, `SatzTresor v${nextVersion}`);
+pkg.description = pkg.description.replace(/(?:SnapPhrase|SatzTresor) v\d+\.\d+\.\d+/, `SnapPhrase v${nextVersion}`);
 fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n', 'utf8');
 
 const lockPath = path.join(projectRoot, 'package-lock.json');
 if (fs.existsSync(lockPath)) {
   try {
     const lock = JSON.parse(fs.readFileSync(lockPath, 'utf8'));
+    lock.name = 'snapphrase';
     lock.version = nextVersion;
     if (lock.packages && lock.packages['']) {
+      lock.packages[''].name = 'snapphrase';
       lock.packages[''].version = nextVersion;
     }
     fs.writeFileSync(lockPath, JSON.stringify(lock, null, 2) + '\n', 'utf8');
@@ -68,7 +70,7 @@ for (const rel of genericHeaderFiles) {
   const fullPath = path.join(projectRoot, rel);
   if (!fs.existsSync(fullPath)) continue;
   const before = fs.readFileSync(fullPath, 'utf8');
-  const after = before.replace(/SatzTresor v\d+\.\d+\.\d+ —/g, `SatzTresor v${nextVersion} —`);
+  const after = before.replace(/(?:SnapPhrase|SatzTresor) v\d+\.\d+\.\d+ —/g, `SnapPhrase v${nextVersion} —`);
   if (after !== before) {
     fs.writeFileSync(fullPath, after, 'utf8');
   }
@@ -92,8 +94,8 @@ const replacements = [
           `<span id="versionTag" class="version-pill">v${nextVersion}</span>`
         )
         .replace(
-          /<span class="settings-title" id="updateStatusHeadline">SatzTresor v\d+\.\d+\.\d+<\/span>/,
-          `<span class="settings-title" id="updateStatusHeadline">SatzTresor v${nextVersion}</span>`
+          /<span class="settings-title" id="updateStatusHeadline">(?:SnapPhrase|SatzTresor) v\d+\.\d+\.\d+<\/span>/,
+          `<span class="settings-title" id="updateStatusHeadline">SnapPhrase v${nextVersion}</span>`
         ),
   },
   {
@@ -101,8 +103,16 @@ const replacements = [
     apply: (txt) =>
       txt
         .replace(/Version-\d+\.\d+\.\d+-2563eb/g, `Version-${nextVersion}-2563eb`)
-        .replace(/SatzTresor-Portable-\d+\.\d+\.\d+\.exe/g, `SatzTresor-Portable-${nextVersion}.exe`)
-        .replace(/SatzTresor-Setup-\d+\.\d+\.\d+\.exe/g, `SatzTresor-Setup-${nextVersion}.exe`),
+        .replace(/(?:SnapPhrase|SatzTresor)-Portable-\d+\.\d+\.\d+\.exe/g, `SnapPhrase-Portable-${nextVersion}.exe`)
+        .replace(/(?:SnapPhrase|SatzTresor)-Setup-\d+\.\d+\.\d+\.exe/g, `SnapPhrase-Setup-${nextVersion}.exe`),
+  },
+  {
+    rel: 'STORE_GUIDE.md',
+    apply: (txt) =>
+      txt
+        .replace(/(?:SnapPhrase|SatzTresor)-Portable-\d+\.\d+\.\d+\.exe/g, `SnapPhrase-Portable-${nextVersion}.exe`)
+        .replace(/(?:SnapPhrase|SatzTresor)-Setup-\d+\.\d+\.\d+\.exe/g, `SnapPhrase-Setup-${nextVersion}.exe`)
+        .replace(/(?:SnapPhrase|SatzTresor)-Store-\d+\.\d+\.\d+\.appx/g, `SnapPhrase-Store-${nextVersion}.appx`),
   },
 ];
 
@@ -116,4 +126,4 @@ for (const item of replacements) {
   }
 }
 
-console.log(`[SatzTresor Version] Updated ${currentVersion} -> ${nextVersion} across all project files.`);
+console.log(`[SnapPhrase Version] Updated ${currentVersion} -> ${nextVersion} across all project files.`);

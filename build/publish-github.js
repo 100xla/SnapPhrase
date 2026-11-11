@@ -1,8 +1,8 @@
 /**
- * SatzTresor — Automated GitHub Release Publisher
- * Uploads dist/latest.yml, dist/*.blockmap, dist/SatzTresor-Setup-<version>.exe,
- * and dist/SatzTresor-Portable-<version>.exe to GitHub Releases (100xla/satztresor)
- * so all installed & portable SatzTresor instances receive the update automatically.
+ * SnapPhrase — Automated GitHub Release Publisher
+ * Uploads dist/latest.yml, dist/*.blockmap, dist/SnapPhrase-Setup-<version>.exe,
+ * and dist/SnapPhrase-Portable-<version>.exe to GitHub Releases (100xla/SnapPhrase)
+ * so all installed & portable SnapPhrase instances receive the update automatically.
  */
 
 const fs = require('fs');
@@ -19,7 +19,7 @@ const tag = `v${version}`;
 
 const publishCfg = Array.isArray(pkg?.build?.publish) ? pkg.build.publish[0] : pkg?.build?.publish;
 const owner = publishCfg?.owner || '100xla';
-const repo = publishCfg?.repo || 'satztresor';
+const repo = publishCfg?.repo || 'SnapPhrase';
 
 function getGitHubToken() {
   if (process.env.GH_TOKEN || process.env.GITHUB_TOKEN) {
@@ -46,7 +46,7 @@ function ghJsonRequest(token, method, apiPath, bodyObj = null) {
         path: apiPath,
         method,
         headers: {
-          'User-Agent': `SatzTresor-Publisher/${version}`,
+          'User-Agent': `SnapPhrase-Publisher/${version}`,
           Authorization: `Bearer ${token}`,
           Accept: 'application/vnd.github+json',
           ...(payload
@@ -92,7 +92,7 @@ function uploadReleaseAsset(token, releaseId, filePath) {
         path: `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/releases/${releaseId}/assets?name=${encodeURIComponent(fileName)}`,
         method: 'POST',
         headers: {
-          'User-Agent': `SatzTresor-Publisher/${version}`,
+          'User-Agent': `SnapPhrase-Publisher/${version}`,
           Authorization: `Bearer ${token}`,
           Accept: 'application/vnd.github+json',
           'Content-Type': contentType,
@@ -122,8 +122,8 @@ function uploadReleaseAsset(token, releaseId, filePath) {
 
 function generateSha256SumsFile() {
   const exeFiles = [
-    `SatzTresor-Setup-${version}.exe`,
-    `SatzTresor-Portable-${version}.exe`,
+    `SnapPhrase-Setup-${version}.exe`,
+    `SnapPhrase-Portable-${version}.exe`,
   ];
   const lines = [];
   for (const name of exeFiles) {
@@ -142,9 +142,9 @@ function generateSha256SumsFile() {
 async function main() {
   const requiredAssets = [
     path.join(distDir, 'latest.yml'),
-    path.join(distDir, `SatzTresor-Setup-${version}.exe`),
-    path.join(distDir, `SatzTresor-Setup-${version}.exe.blockmap`),
-    path.join(distDir, `SatzTresor-Portable-${version}.exe`),
+    path.join(distDir, `SnapPhrase-Setup-${version}.exe`),
+    path.join(distDir, `SnapPhrase-Setup-${version}.exe.blockmap`),
+    path.join(distDir, `SnapPhrase-Portable-${version}.exe`),
   ];
 
   for (const f of requiredAssets) {
@@ -176,15 +176,15 @@ async function main() {
       {
         tag_name: tag,
         target_commitish: 'main',
-        name: `SatzTresor v${version}`,
+        name: `SnapPhrase v${version}`,
         body: [
-          `## SatzTresor v${version}`,
+          `## SnapPhrase v${version}`,
           '',
-          '### Downloads',
-          `- **Windows-Installer (Empfohlen, mit Auto-Update):** \`SatzTresor-Setup-${version}.exe\``,
-          `- **Portable-Version (Ohne Installation / USB-Stick):** \`SatzTresor-Portable-${version}.exe\``,
+          '### Downloads (Windows 10 / 11 x64)',
+          `- **Windows Installer (Recommended, with Auto-Update / Empfohlen, mit Auto-Update):** \`SnapPhrase-Setup-${version}.exe\``,
+          `- **Portable Edition (No install / USB stick / Ohne Installation):** \`SnapPhrase-Portable-${version}.exe\``,
           '',
-          '*Automatische Hintergrund-Updates (`latest.yml` + `.blockmap`) sind für alle installierten Versionen aktiv.*',
+          '*Automatic background updates (`latest.yml` + `.blockmap`) are active for all installed versions.*',
         ].join('\n'),
         draft: false,
         prerelease: false,

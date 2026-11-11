@@ -1,5 +1,5 @@
 /**
- * SatzTresor v1.5.6 — Win32 Native Integration (Koffi FFI)
+ * SnapPhrase v1.6.0 — Win32 Native Integration (Koffi FFI)
  * Handles window focus, clipboard protection (Win+V history exclusion),
  * atomic SendInput keyboard simulation, unified Low-Level Keyboard Hook (WH_KEYBOARD_LL)
  * for Double-Tap Ctrl trigger + automatic Hotstring expansion,
@@ -1334,8 +1334,12 @@ const REG_BINARY = 3;
 
 const RUN_SUBKEY = 'Software\\Microsoft\\Windows\\CurrentVersion\\Run';
 const STARTUP_APPROVED_SUBKEY = 'Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run';
-const AUTOSTART_VALUE_NAME = 'SatzTresor';
-const LEGACY_AUTOSTART_VALUE_NAME = 'electron.app.SatzTresor';
+const AUTOSTART_VALUE_NAME = 'SnapPhrase';
+const LEGACY_AUTOSTART_VALUE_NAMES = [
+  'SatzTresor',
+  'electron.app.SatzTresor',
+  'electron.app.SnapPhrase',
+];
 
 function buildAutostartCommand({ isPackaged = true, execPath = '', portableExecPath = '', appDir = '' } = {}) {
   if (isPackaged) {
@@ -1396,10 +1400,12 @@ function getWindowsAutostart(options = {}) {
       return true;
     }
 
-    const legacyVal = readRegistryStringValue(RUN_SUBKEY, LEGACY_AUTOSTART_VALUE_NAME);
-    if (legacyVal) {
-      if (isStartupApprovedDisabled(LEGACY_AUTOSTART_VALUE_NAME)) return false;
-      return true;
+    for (const legacyName of LEGACY_AUTOSTART_VALUE_NAMES) {
+      const legacyVal = readRegistryStringValue(RUN_SUBKEY, legacyName);
+      if (legacyVal) {
+        if (isStartupApprovedDisabled(legacyName)) return false;
+        return true;
+      }
     }
     return false;
   } catch (err) {
@@ -1439,18 +1445,22 @@ function setWindowsAutostart(enabled, options = {}) {
       try {
         const utf16 = Buffer.from(cmd + '\0', 'utf16le');
         rcSet = RegSetValueExW(phkRun[0], AUTOSTART_VALUE_NAME, 0, REG_SZ, utf16, utf16.length);
-        // Clean up any legacy unquoted Electron entry so there are never duplicate/broken Run items
-        RegDeleteValueW(phkRun[0], LEGACY_AUTOSTART_VALUE_NAME);
+        // Clean up any legacy entries so there are never duplicate/broken Run items
+        for (const legacyName of LEGACY_AUTOSTART_VALUE_NAMES) {
+          RegDeleteValueW(phkRun[0], legacyName);
+        }
       } finally {
         RegCloseKey(phkRun[0]);
       }
 
-      // Ensure Windows Task Manager StartupApproved\Run marks SatzTresor as approved/enabled
+      // Ensure Windows Task Manager StartupApproved\Run marks SnapPhrase as approved/enabled
       const phkApp = [0];
       const rcApp = RegOpenKeyExW(HKEY_CURRENT_USER, STARTUP_APPROVED_SUBKEY, 0, KEY_READ | KEY_WRITE, phkApp);
       if (rcApp === 0 && phkApp[0]) {
         try {
-          RegDeleteValueW(phkApp[0], LEGACY_AUTOSTART_VALUE_NAME);
+          for (const legacyName of LEGACY_AUTOSTART_VALUE_NAMES) {
+            RegDeleteValueW(phkApp[0], legacyName);
+          }
           const approvedBytes = Buffer.alloc(12, 0);
           approvedBytes[0] = 0x02;
           RegSetValueExW(phkApp[0], AUTOSTART_VALUE_NAME, 0, REG_BINARY, approvedBytes, approvedBytes.length);
@@ -1462,12 +1472,14 @@ function setWindowsAutostart(enabled, options = {}) {
       return { success: rcSet === 0, enabled: getWindowsAutostart(options) };
     }
 
-    // Disable autostart: delete both canonical and legacy values cleanly
+    // Disable autostart: delete canonical and all legacy values cleanly
     const phkRun = [0];
     if (RegOpenKeyExW(HKEY_CURRENT_USER, RUN_SUBKEY, 0, KEY_WRITE, phkRun) === 0 && phkRun[0]) {
       try {
         RegDeleteValueW(phkRun[0], AUTOSTART_VALUE_NAME);
-        RegDeleteValueW(phkRun[0], LEGACY_AUTOSTART_VALUE_NAME);
+        for (const legacyName of LEGACY_AUTOSTART_VALUE_NAMES) {
+          RegDeleteValueW(phkRun[0], legacyName);
+        }
       } finally {
         RegCloseKey(phkRun[0]);
       }
@@ -1477,7 +1489,9 @@ function setWindowsAutostart(enabled, options = {}) {
     if (RegOpenKeyExW(HKEY_CURRENT_USER, STARTUP_APPROVED_SUBKEY, 0, KEY_WRITE, phkApp) === 0 && phkApp[0]) {
       try {
         RegDeleteValueW(phkApp[0], AUTOSTART_VALUE_NAME);
-        RegDeleteValueW(phkApp[0], LEGACY_AUTOSTART_VALUE_NAME);
+        for (const legacyName of LEGACY_AUTOSTART_VALUE_NAMES) {
+          RegDeleteValueW(phkApp[0], legacyName);
+        }
       } finally {
         RegCloseKey(phkApp[0]);
       }
@@ -1491,19 +1505,22 @@ function setWindowsAutostart(enabled, options = {}) {
 }
 
 /**
- * Self-heals existing autostart entries on packaged launch (e.g. migrates legacy unquoted `electron.app.SatzTresor`
- * to properly quoted `"<exe>" --hidden`, or updates path if the user moved the Portable EXE or reinstalled).
+ * Self-heals existing autostart entries on packaged launch (e.g. migrates legacy `SatzTresor`
+ * to `SnapPhrase` `"<exe>" --hidden`, or updates path if the user moved the Portable EXE or reinstalled).
  */
 function syncWindowsAutostartOnLaunch(options = {}) {
   if (!options.isPackaged) return;
   try {
     const hasPrimary = Boolean(readRegistryStringValue(RUN_SUBKEY, AUTOSTART_VALUE_NAME));
-    const hasLegacy = Boolean(readRegistryStringValue(RUN_SUBKEY, LEGACY_AUTOSTART_VALUE_NAME));
+    const activeLegacyName = LEGACY_AUTOSTART_VALUE_NAMES.find((name) =>
+      Boolean(readRegistryStringValue(RUN_SUBKEY, name))
+    );
+    const hasLegacy = Boolean(activeLegacyName);
     if (!hasPrimary && !hasLegacy) return;
 
     // Respect user's explicit disable in Windows Task Manager
     if (hasPrimary && isStartupApprovedDisabled(AUTOSTART_VALUE_NAME)) return;
-    if (!hasPrimary && hasLegacy && isStartupApprovedDisabled(LEGACY_AUTOSTART_VALUE_NAME)) return;
+    if (!hasPrimary && activeLegacyName && isStartupApprovedDisabled(activeLegacyName)) return;
 
     const desiredCmd = buildAutostartCommand(options);
     const currentPrimary = readRegistryStringValue(RUN_SUBKEY, AUTOSTART_VALUE_NAME);

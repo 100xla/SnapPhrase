@@ -1,4 +1,4 @@
-name: Build & Release SatzTresor (Windows)
+name: Build & Release SnapPhrase (Windows)
 
 on:
   push:

@@ -1,12 +1,13 @@
 /**
- * SatzTresor v1.5.6 — Main Process
+ * SnapPhrase v1.6.0 — Main Process
  * Supports:
  * - Centered Spotlight Mode (Apple-inspired floating palette with smooth blurred & dimmed desktop backdrop)
- * - Automatic Background Updates via GitHub Releases & NSIS Delta Updates (electron-updater)
+ * - Automatic Bilingual UI & Templates (Auto-detects Windows language DE/EN + manual switch in Settings)
+ * - Automatic Background Updates via GitHub Releases & NSIS Delta Updates (electron-updater) + Microsoft Store mode
  * - Triggers:
  *   1. Double-Tap Ctrl (2x quick Ctrl tap — zero text interference, zero conflicts)
  *   2. Freely recordable Global Hotkeys + 1-Click System Tray
- * - Global Hotstring Engine: Optional real-time text expansion (e.g. ;;mfg) across Windows apps
+ * - Global Hotstring Engine: Optional real-time text expansion (e.g. ;;mfg / ;;br) across Windows apps
  * - Features: Pinning, Multi-Monitor DPI-aware centering, Favorites, Duplication, Date/Time/Variable templates,
  *   Silent Windows Autostart (--hidden), Clipboard protection & restoration, AES-256 encryption (lock & password change),
  *   and JSON/CSV/INI export & import.
@@ -30,11 +31,11 @@ const path = require('path');
 const fs = require('fs');
 const Storage = require('./storage');
 const win32 = require('./win32');
-const { SatzTresorUpdater } = require('./updater');
+const { SnapPhraseUpdater } = require('./updater');
 
-const APP_ID = 'de.satztresor.app';
-const APP_NAME = 'SatzTresor';
-const APP_VERSION = '1.5.6';
+const APP_ID = 'com.snapphrase.app';
+const APP_NAME = 'SnapPhrase';
+const APP_VERSION = '1.6.0';
 const CENTER_WIDTH_STANDARD = 1120;
 const CENTER_HEIGHT_STANDARD = 780;
 const CENTER_WIDTH_COMPACT = 580;
@@ -77,15 +78,18 @@ const launchedHidden =
 
 function getStorageFilePath() {
   if (app.isPackaged && process.env.PORTABLE_EXECUTABLE_DIR) {
-    const portableDataDir = path.join(process.env.PORTABLE_EXECUTABLE_DIR, 'SatzTresor-Daten');
-    const legacyPortableDataDir = path.join(process.env.PORTABLE_EXECUTABLE_DIR, 'QuickTab-Daten');
+    const portableDirs = [
+      path.join(process.env.PORTABLE_EXECUTABLE_DIR, 'SnapPhrase-Data'),
+      path.join(process.env.PORTABLE_EXECUTABLE_DIR, 'SnapPhrase-Daten'),
+      path.join(process.env.PORTABLE_EXECUTABLE_DIR, 'SatzTresor-Daten'),
+      path.join(process.env.PORTABLE_EXECUTABLE_DIR, 'QuickTab-Daten'),
+    ];
+    for (const d of portableDirs) {
+      if (fs.existsSync(d)) {
+        return path.join(d, 'bausteine.ini');
+      }
+    }
     const portableLegacyIni = path.join(process.env.PORTABLE_EXECUTABLE_DIR, 'bausteine.ini');
-    if (fs.existsSync(portableDataDir)) {
-      return path.join(portableDataDir, 'bausteine.ini');
-    }
-    if (fs.existsSync(legacyPortableDataDir)) {
-      return path.join(legacyPortableDataDir, 'bausteine.ini');
-    }
     if (fs.existsSync(portableLegacyIni)) {
       return portableLegacyIni;
     }
@@ -103,9 +107,23 @@ function getStorageFilePath() {
   if (app.isPackaged || hasCustomUserDataArg) {
     if (!fs.existsSync(userFile) && !hasCustomUserDataArg) {
       try {
-        const legacyQuickTabFile = path.join(app.getPath('appData'), 'quicktab', 'bausteine.ini');
-        if (fs.existsSync(legacyQuickTabFile)) {
-          fs.copyFileSync(legacyQuickTabFile, userFile);
+        const appDataRoot = app.getPath('appData');
+        const legacyDirs = [
+          path.join(appDataRoot, 'satztresor'),
+          path.join(appDataRoot, 'SatzTresor'),
+          path.join(appDataRoot, 'quicktab'),
+        ];
+        for (const legacyDir of legacyDirs) {
+          const legacyIni = path.join(legacyDir, 'bausteine.ini');
+          if (fs.existsSync(legacyIni)) {
+            fs.copyFileSync(legacyIni, userFile);
+            const legacyUi = path.join(legacyDir, 'satztresor-ui.json');
+            const newUi = path.join(userDataDir, 'snapphrase-ui.json');
+            if (fs.existsSync(legacyUi) && !fs.existsSync(newUi)) {
+              fs.copyFileSync(legacyUi, newUi);
+            }
+            break;
+          }
         }
       } catch (e) {}
     }
@@ -118,7 +136,10 @@ function getStorageFilePath() {
 
 function getAppIcon() {
   const candidates = [
+    process.resourcesPath ? path.join(process.resourcesPath, 'snapphrase.ico') : '',
     process.resourcesPath ? path.join(process.resourcesPath, 'satztresor.ico') : '',
+    path.join(__dirname, '..', 'snapphrase.ico'),
+    path.join(__dirname, '..', 'snapphrase.png'),
     path.join(__dirname, '..', 'satztresor.ico'),
     path.join(__dirname, '..', 'satztresor.png'),
     path.join(__dirname, '..', 'build', 'icon.png'),
@@ -151,10 +172,29 @@ if (!hasCustomUserDataArg) {
 const storageFile = getStorageFilePath();
 const appIcon = getAppIcon();
 
-const storage = new Storage(storageFile);
+function detectInitialSystemLocale() {
+  try {
+    if (app && typeof app.getLocale === 'function') {
+      const loc = app.getLocale();
+      if (loc) return loc;
+    }
+  } catch (e) {}
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().locale || 'de-DE';
+  } catch (e) {
+    return 'de-DE';
+  }
+}
+
+const isWindowsStoreBuild = Boolean(process.windowsStore);
+const storage = new Storage(storageFile, { systemLocale: detectInitialSystemLocale() });
 storage.init();
 console.log(`[Storage] File: ${storageFile}`);
-console.log(`[Storage] Encrypted: ${storage.isEncrypted}, Locked: ${storage.isLocked}, Layout: ${storage.getLayoutMode()}`);
+console.log(`[Storage] Encrypted: ${storage.isEncrypted}, Locked: ${storage.isLocked}, Lang: ${storage.getEffectiveLanguage()}`);
+
+function isEn() {
+  return storage.getEffectiveLanguage() === 'en';
+}
 
 function getAutostartRuntimeOptions() {
   return {
@@ -169,7 +209,7 @@ function getAutostartEnabled() {
   if (hasCustomUserDataArg) {
     return simulatedAutostartForTests;
   }
-  if (process.platform === 'win32') {
+  if (process.platform === 'win32' && !isWindowsStoreBuild) {
     return win32.getWindowsAutostart(getAutostartRuntimeOptions());
   }
   try {
@@ -192,7 +232,7 @@ function setAutostartEnabled(enabled) {
     simulatedAutostartForTests = desired;
     return { success: true, enabled: desired };
   }
-  if (process.platform === 'win32') {
+  if (process.platform === 'win32' && !isWindowsStoreBuild) {
     return win32.setWindowsAutostart(desired, getAutostartRuntimeOptions());
   }
   try {
@@ -237,7 +277,7 @@ function handleWindowsSessionEnd() {
 }
 
 syncSystemTheme();
-if (!hasCustomUserDataArg && process.platform === 'win32') {
+if (!hasCustomUserDataArg && process.platform === 'win32' && !isWindowsStoreBuild) {
   win32.syncWindowsAutostartOnLaunch(getAutostartRuntimeOptions());
 }
 
@@ -541,6 +581,7 @@ function createSatzTresorWindow() {
   mainWindow.loadFile(path.join(__dirname, '..', 'ui', 'index.html'), {
     query: {
       theme: storage.getTheme(),
+      lang: storage.getEffectiveLanguage(),
     },
   });
 
@@ -690,6 +731,9 @@ function sendDataToRenderer(options = {}) {
   const payload = {
     type: 'updateData',
     version: APP_VERSION,
+    language: storage.getLanguage(),
+    effectiveLanguage: storage.getEffectiveLanguage(),
+    isWindowsStore: isWindowsStoreBuild,
     layoutMode: storage.getLayoutMode(),
     sidebarWidth: storage.getSidebarWidth(),
     centerCompact: storage.getCenterCompact(),
@@ -937,12 +981,17 @@ function toggleWindow(forceShow = false, source = 'auto') {
 }
 
 // ============================================================================
-// Template & Paste Engine
+// Template & Paste Engine (Bilingual DE + EN Placeholders)
 // ============================================================================
 const GERMAN_WEEKDAYS = ['Sonntag', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag'];
 const GERMAN_WEEKDAYS_SHORT = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'];
 const GERMAN_MONTHS = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'];
 const GERMAN_MONTHS_SHORT = ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'];
+
+const ENGLISH_WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const ENGLISH_WEEKDAYS_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const ENGLISH_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const ENGLISH_MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 function formatDateTimeCustom(d, fmt) {
   const pad = (n) => String(n).padStart(2, '0');
@@ -982,7 +1031,7 @@ function resolveTemplates(text, sourceClipboardText = null) {
   const defaultDate = `${pad(now.getDate())}.${pad(now.getMonth() + 1)}.${now.getFullYear()}`;
   const defaultTime = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
 
-  resolved = resolved.replace(/\{datum:([+-]\d+)d?\}/gi, (match, offsetStr) => {
+  resolved = resolved.replace(/\{(?:datum|date):([+-]\d+)d?\}/gi, (match, offsetStr) => {
     const offset = parseInt(offsetStr, 10);
     const relDate = new Date();
     relDate.setDate(relDate.getDate() + offset);
@@ -994,10 +1043,15 @@ function resolveTemplates(text, sourceClipboardText = null) {
   resolved = resolved.replace(/\{monat\}/gi, GERMAN_MONTHS[now.getMonth()]);
   resolved = resolved.replace(/\{monat_kurz\}/gi, GERMAN_MONTHS_SHORT[now.getMonth()]);
 
-  resolved = resolved.replace(/\{datum:([^}]+)\}/gi, (m, fmt) => formatDateTimeCustom(now, fmt));
-  resolved = resolved.replace(/\{datum\}/gi, defaultDate);
-  resolved = resolved.replace(/\{zeit:([^}]+)\}/gi, (m, fmt) => formatDateTimeCustom(now, fmt));
-  resolved = resolved.replace(/\{zeit\}/gi, defaultTime);
+  resolved = resolved.replace(/\{weekday\}/gi, ENGLISH_WEEKDAYS[now.getDay()]);
+  resolved = resolved.replace(/\{weekday_short\}/gi, ENGLISH_WEEKDAYS_SHORT[now.getDay()]);
+  resolved = resolved.replace(/\{month\}/gi, ENGLISH_MONTHS[now.getMonth()]);
+  resolved = resolved.replace(/\{month_short\}/gi, ENGLISH_MONTHS_SHORT[now.getMonth()]);
+
+  resolved = resolved.replace(/\{(?:datum|date):([^}]+)\}/gi, (m, fmt) => formatDateTimeCustom(now, fmt));
+  resolved = resolved.replace(/\{(?:datum|date)\}/gi, defaultDate);
+  resolved = resolved.replace(/\{(?:zeit|time):([^}]+)\}/gi, (m, fmt) => formatDateTimeCustom(now, fmt));
+  resolved = resolved.replace(/\{(?:zeit|time)\}/gi, defaultTime);
 
   const clipContent = sourceClipboardText !== null ? sourceClipboardText : (clipboard.readText() || '');
   resolved = resolved.replace(/\{clipboard\}/gi, () => clipContent);
@@ -1093,6 +1147,12 @@ async function executePaste(text, savedClipboardOverride = null) {
 }
 
 function formatHotkeyLabel(hk) {
+  if (isEn()) {
+    return String(hk || '')
+      .replace('CommandOrControl', 'Ctrl')
+      .replace('Control', 'Ctrl')
+      .replace('Plus', '+');
+  }
   return String(hk || '')
     .replace('Control', 'Strg')
     .replace('CommandOrControl', 'Strg')
@@ -1111,7 +1171,7 @@ function buildExportDefaultFilename() {
   const y = now.getFullYear();
   const m = String(now.getMonth() + 1).padStart(2, '0');
   const d = String(now.getDate()).padStart(2, '0');
-  return `SatzTresor_Backup_${y}-${m}-${d}.json`;
+  return `SnapPhrase_Backup_${y}-${m}-${d}.json`;
 }
 
 function notifyTransferFeedback({ ok, title, message, toast }) {
@@ -1141,13 +1201,19 @@ function notifyTransferFeedback({ ok, title, message, toast }) {
 }
 
 async function openImportDialog() {
+  const en = isEn();
   const parentWin = mainWindow && mainWindow.isVisible() ? mainWindow : undefined;
   const { filePaths } = await withSystemDialog(() =>
     dialog.showOpenDialog(parentWin, {
-      title: 'Bausteine importieren',
+      title: en ? 'Import Snippets' : 'Bausteine importieren',
       defaultPath: app.getPath('desktop'),
       filters: [
-        { name: 'SatzTresor-Dateien (*.json, *.ini, *.csv)', extensions: ['json', 'ini', 'csv'] },
+        {
+          name: en
+            ? 'SnapPhrase Files (*.json, *.ini, *.csv)'
+            : 'SnapPhrase-Dateien (*.json, *.ini, *.csv)',
+          extensions: ['json', 'ini', 'csv'],
+        },
       ],
       properties: ['openFile'],
     })
@@ -1158,32 +1224,43 @@ async function openImportDialog() {
     if (res.success) {
       restartKeyboardHook();
       sendDataToRenderer();
-      const label = res.count === 1 ? '1 Baustein importiert' : `${res.count} Bausteine importiert`;
+      const label = en
+        ? res.count === 1
+          ? '1 snippet imported'
+          : `${res.count} snippets imported`
+        : res.count === 1
+          ? '1 Baustein importiert'
+          : `${res.count} Bausteine importiert`;
       await notifyTransferFeedback({
         ok: true,
-        title: 'Import erfolgreich',
+        title: en ? 'Import Successful' : 'Import erfolgreich',
         message: `${label}.`,
         toast: `✓ ${label}`,
       });
     } else {
       await notifyTransferFeedback({
         ok: false,
-        title: 'Import fehlgeschlagen',
-        message: res.error || 'Die ausgewählte Datei konnte nicht importiert werden.',
+        title: en ? 'Import Failed' : 'Import fehlgeschlagen',
+        message:
+          res.error ||
+          (en
+            ? 'The selected file could not be imported.'
+            : 'Die ausgewählte Datei konnte nicht importiert werden.'),
       });
     }
   }
 }
 
 async function openExportDialog(preferredFormat = 'json') {
+  const en = isEn();
   const ext = ['json', 'csv', 'ini'].includes(String(preferredFormat || '').toLowerCase())
     ? String(preferredFormat).toLowerCase()
     : 'json';
   const baseDefault = buildExportDefaultFilename().replace(/\.json$/i, `.${ext}`);
   const allFilters = [
-    { name: 'SatzTresor-Sicherung (*.json)', extensions: ['json'] },
-    { name: 'CSV-Tabelle (*.csv)', extensions: ['csv'] },
-    { name: 'INI-Textdatei (*.ini)', extensions: ['ini'] },
+    { name: en ? 'SnapPhrase Backup (*.json)' : 'SnapPhrase-Sicherung (*.json)', extensions: ['json'] },
+    { name: en ? 'CSV Spreadsheet (*.csv)' : 'CSV-Tabelle (*.csv)', extensions: ['csv'] },
+    { name: en ? 'INI Text File (*.ini)' : 'INI-Textdatei (*.ini)', extensions: ['ini'] },
   ];
   const orderedFilters = [
     ...allFilters.filter((f) => f.extensions[0] === ext),
@@ -1193,7 +1270,7 @@ async function openExportDialog(preferredFormat = 'json') {
   const parentWin = mainWindow && mainWindow.isVisible() ? mainWindow : undefined;
   const { filePath } = await withSystemDialog(() =>
     dialog.showSaveDialog(parentWin, {
-      title: 'Bausteine exportieren',
+      title: en ? 'Export Snippets' : 'Bausteine exportieren',
       defaultPath: path.join(app.getPath('desktop'), baseDefault),
       filters: orderedFilters,
     })
@@ -1202,35 +1279,52 @@ async function openExportDialog(preferredFormat = 'json') {
   if (filePath) {
     const ok = storage.exportSnippets(filePath);
     const count = storage.getSnippets().length;
-    const countLabel = count === 1 ? '1 Baustein gesichert' : `${count} Bausteine gesichert`;
+    const countLabel = en
+      ? count === 1
+        ? '1 snippet backed up'
+        : `${count} snippets backed up`
+      : count === 1
+        ? '1 Baustein gesichert'
+        : `${count} Bausteine gesichert`;
     await notifyTransferFeedback({
       ok,
-      title: ok ? 'Export erfolgreich' : 'Export fehlgeschlagen',
+      title: ok
+        ? en
+          ? 'Export Successful'
+          : 'Export erfolgreich'
+        : en
+          ? 'Export Failed'
+          : 'Export fehlgeschlagen',
       message: ok
-        ? `${countLabel} unter:\n${filePath}`
-        : 'Die Sicherungsdatei konnte am gewählten Ort nicht gespeichert werden.',
+        ? en
+          ? `${countLabel} to:\n${filePath}`
+          : `${countLabel} unter:\n${filePath}`
+        : en
+          ? 'The backup file could not be saved to the selected location.'
+          : 'Die Sicherungsdatei konnte am gewählten Ort nicht gespeichert werden.',
       toast: `✓ ${countLabel}`,
     });
   }
 }
 
 function updateTrayMenu() {
+  const en = isEn();
   const doubleTapOn = storage.getDoubleTapCtrlEnabled();
   const hotstringsOn = storage.getHotstringsEnabled();
   const activeHks = storage.getActiveHotkeys();
 
   const hints = [];
-  if (doubleTapOn) hints.push('2× Strg');
+  if (doubleTapOn) hints.push(en ? '2× Ctrl' : '2× Strg');
   if (activeHks.length > 0) hints.push(formatHotkeyLabel(activeHks[0]));
   const openHint = hints.length > 0 ? ` (${hints.join(' / ')})` : '';
 
   const template = [
     {
-      label: `${APP_NAME} öffnen${openHint}`,
+      label: en ? `Open ${APP_NAME}${openHint}` : `${APP_NAME} öffnen${openHint}`,
       click: () => toggleWindow(true, 'mouse'),
     },
     {
-      label: 'Neuer Baustein…',
+      label: en ? 'New Snippet…' : 'Neuer Baustein…',
       click: () => {
         showWindow({
           source: 'mouse',
@@ -1240,7 +1334,7 @@ function updateTrayMenu() {
     },
     { type: 'separator' },
     {
-      label: 'Automatische Textersetzung',
+      label: en ? 'Auto Text Expansion' : 'Automatische Textersetzung',
       type: 'checkbox',
       checked: hotstringsOn,
       click: (item) => {
@@ -1254,7 +1348,7 @@ function updateTrayMenu() {
 
   if (storage.isEncrypted && !storage.isLocked) {
     template.push({
-      label: 'Tresor jetzt sperren',
+      label: en ? 'Lock Vault Now' : 'Tresor jetzt sperren',
       click: () => {
         storage.lock();
         restartKeyboardHook();
@@ -1270,7 +1364,7 @@ function updateTrayMenu() {
   template.push(
     { type: 'separator' },
     {
-      label: 'Einstellungen…',
+      label: en ? 'Settings…' : 'Einstellungen…',
       click: () => {
         showWindow({
           source: 'mouse',
@@ -1288,8 +1382,12 @@ function updateTrayMenu() {
     template.push({
       label:
         updState.status === 'portable-available'
-          ? `Update v${updState.availableVersion} herunterladen…`
-          : `Update v${updState.availableVersion} jetzt installieren`,
+          ? en
+            ? `Download Update v${updState.availableVersion}…`
+            : `Update v${updState.availableVersion} herunterladen…`
+          : en
+            ? `Install Update v${updState.availableVersion} Now`
+            : `Update v${updState.availableVersion} jetzt installieren`,
       click: () => {
         if (updater) updater.installNow();
       },
@@ -1299,7 +1397,7 @@ function updateTrayMenu() {
   template.push(
     { type: 'separator' },
     {
-      label: 'Beenden',
+      label: en ? 'Quit' : 'Beenden',
       click: () => {
         isQuitting = true;
         app.quit();
@@ -1309,6 +1407,11 @@ function updateTrayMenu() {
 
   currentTrayMenu = Menu.buildFromTemplate(template);
   if (tray) {
+    tray.setToolTip(
+      en
+        ? `${APP_NAME} v${APP_VERSION} — Text Expander & Snippet Vault`
+        : `${APP_NAME} v${APP_VERSION} — Satzbaustein-Manager`
+    );
     tray.setContextMenu(currentTrayMenu);
   }
 }
@@ -1453,7 +1556,7 @@ ipcMain.on('satztresor-msg', (event, data) => {
         if (isPinned && mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('satztresor-msg', {
             type: 'showToast',
-            message: '✓ Eingefügt',
+            message: isEn() ? '✓ Inserted' : '✓ Eingefügt',
           });
         }
       })().catch((err) => console.error('[Main] paste error:', err));
@@ -1471,7 +1574,7 @@ ipcMain.on('satztresor-msg', (event, data) => {
       }
       mainWindow.webContents.send('satztresor-msg', {
         type: 'showToast',
-        message: '✓ In Zwischenablage kopiert',
+        message: isEn() ? '✓ Copied to clipboard' : '✓ In Zwischenablage kopiert',
       });
       break;
     }
@@ -1482,7 +1585,13 @@ ipcMain.on('satztresor-msg', (event, data) => {
         sendDataToRenderer();
         mainWindow.webContents.send('satztresor-msg', {
           type: 'showToast',
-          message: isFav ? '★ Zu Favoriten hinzugefügt' : 'Aus Favoriten entfernt',
+          message: isFav
+            ? isEn()
+              ? '★ Added to favorites'
+              : '★ Zu Favoriten hinzugefügt'
+            : isEn()
+              ? 'Removed from favorites'
+              : 'Aus Favoriten entfernt',
         });
       }
       break;
@@ -1495,7 +1604,7 @@ ipcMain.on('satztresor-msg', (event, data) => {
         sendDataToRenderer();
         mainWindow.webContents.send('satztresor-msg', {
           type: 'showToast',
-          message: `✓ Dupliziert als „${newTitle}“`,
+          message: isEn() ? `✓ Duplicated as "${newTitle}"` : `✓ Dupliziert als „${newTitle}“`,
         });
       }
       break;
@@ -1516,8 +1625,12 @@ ipcMain.on('satztresor-msg', (event, data) => {
       mainWindow.webContents.send('satztresor-msg', {
         type: 'showToast',
         message: next
-          ? '✓ Im Vordergrund angeheftet'
-          : '✓ Anheftung gelöst',
+          ? isEn()
+            ? '✓ Pinned on top'
+            : '✓ Im Vordergrund angeheftet'
+          : isEn()
+            ? '✓ Unpinned'
+            : '✓ Anheftung gelöst',
       });
       break;
     }
@@ -1540,8 +1653,12 @@ ipcMain.on('satztresor-msg', (event, data) => {
       mainWindow.webContents.send('satztresor-msg', {
         type: 'showToast',
         message: nextCompact
-          ? `⇤ Kompaktansicht (${CENTER_WIDTH_COMPACT}×${CENTER_HEIGHT_COMPACT})`
-          : `⇥ Großansicht (${CENTER_WIDTH_STANDARD}×${CENTER_HEIGHT_STANDARD})`,
+          ? isEn()
+            ? `⇤ Compact view (${CENTER_WIDTH_COMPACT}×${CENTER_HEIGHT_COMPACT})`
+            : `⇤ Kompaktansicht (${CENTER_WIDTH_COMPACT}×${CENTER_HEIGHT_COMPACT})`
+          : isEn()
+            ? `⇥ Standard view (${CENTER_WIDTH_STANDARD}×${CENTER_HEIGHT_STANDARD})`
+            : `⇥ Großansicht (${CENTER_WIDTH_STANDARD}×${CENTER_HEIGHT_STANDARD})`,
       });
       break;
     }
@@ -1550,7 +1667,10 @@ ipcMain.on('satztresor-msg', (event, data) => {
       storage.saveSnippet(data);
       restartKeyboardHook();
       sendDataToRenderer();
-      mainWindow.webContents.send('satztresor-msg', { type: 'showToast', message: '✓ Gespeichert' });
+      mainWindow.webContents.send('satztresor-msg', {
+        type: 'showToast',
+        message: isEn() ? '✓ Saved' : '✓ Gespeichert',
+      });
       break;
     }
 
@@ -1559,7 +1679,23 @@ ipcMain.on('satztresor-msg', (event, data) => {
         storage.deleteSnippet(data.title);
         restartKeyboardHook();
         sendDataToRenderer();
-        mainWindow.webContents.send('satztresor-msg', { type: 'showToast', message: '✓ Gelöscht' });
+        mainWindow.webContents.send('satztresor-msg', {
+          type: 'showToast',
+          message: isEn() ? '✓ Deleted' : '✓ Gelöscht',
+        });
+      }
+      break;
+    }
+
+    case 'setLanguage': {
+      if (typeof data.language === 'string') {
+        storage.setLanguage(data.language);
+        sendDataToRenderer();
+        updateTrayMenu();
+        mainWindow.webContents.send('satztresor-msg', {
+          type: 'showToast',
+          message: isEn() ? '✓ Language updated' : '✓ Sprache aktualisiert',
+        });
       }
       break;
     }
@@ -1581,14 +1717,20 @@ ipcMain.on('satztresor-msg', (event, data) => {
         syncNativeBackdrop();
         sendDataToRenderer();
         updateTrayMenu();
-        const labels = {
-          blur: '✓ Hintergrund: Unscharf (Milchglas)',
-          solid: '✓ Hintergrund: Vollständig ausgeblendet',
-          off: 'Hintergrund-Effekt deaktiviert',
-        };
+        const labels = isEn()
+          ? {
+              blur: '✓ Backdrop: Frosted blur',
+              solid: '✓ Backdrop: Solid dim',
+              off: 'Backdrop effect disabled',
+            }
+          : {
+              blur: '✓ Hintergrund: Unscharf (Milchglas)',
+              solid: '✓ Hintergrund: Vollständig ausgeblendet',
+              off: 'Hintergrund-Effekt deaktiviert',
+            };
         mainWindow.webContents.send('satztresor-msg', {
           type: 'showToast',
-          message: labels[storage.getBackdropMode()] || '✓ Gespeichert',
+          message: labels[storage.getBackdropMode()] || (isEn() ? '✓ Saved' : '✓ Gespeichert'),
         });
       }
       break;
@@ -1618,7 +1760,13 @@ ipcMain.on('satztresor-msg', (event, data) => {
       updateTrayMenu();
       mainWindow.webContents.send('satztresor-msg', {
         type: 'showToast',
-        message: enabled ? '✓ Hintergrund-Effekt aktiviert' : 'Hintergrund-Effekt deaktiviert',
+        message: enabled
+          ? isEn()
+            ? '✓ Backdrop effect enabled'
+            : '✓ Hintergrund-Effekt aktiviert'
+          : isEn()
+            ? 'Backdrop effect disabled'
+            : 'Hintergrund-Effekt deaktiviert',
       });
       break;
     }
@@ -1631,10 +1779,16 @@ ipcMain.on('satztresor-msg', (event, data) => {
       updateTrayMenu();
       const toastText =
         res && res.success === false
-          ? '⚠️ Autostart konnte nicht geändert werden'
+          ? isEn()
+            ? '⚠️ Could not change Windows startup setting'
+            : '⚠️ Autostart konnte nicht geändert werden'
           : actualEnabled
-            ? '✓ Mit Windows starten aktiviert'
-            : '✓ Mit Windows starten deaktiviert';
+            ? isEn()
+              ? '✓ Start with Windows enabled'
+              : '✓ Mit Windows starten aktiviert'
+            : isEn()
+              ? '✓ Start with Windows disabled'
+              : '✓ Mit Windows starten deaktiviert';
       mainWindow.webContents.send('satztresor-msg', {
         type: 'showToast',
         message: toastText,
@@ -1649,7 +1803,13 @@ ipcMain.on('satztresor-msg', (event, data) => {
       updateTrayMenu();
       mainWindow.webContents.send('satztresor-msg', {
         type: 'showToast',
-        message: data.enabled ? '✓ 2× Strg Aufruf aktiviert' : '2× Strg Aufruf deaktiviert',
+        message: data.enabled
+          ? isEn()
+            ? '✓ 2× Ctrl trigger enabled'
+            : '✓ 2× Strg Aufruf aktiviert'
+          : isEn()
+            ? '2× Ctrl trigger disabled'
+            : '2× Strg Aufruf deaktiviert',
       });
       break;
     }
@@ -1661,7 +1821,13 @@ ipcMain.on('satztresor-msg', (event, data) => {
       updateTrayMenu();
       mainWindow.webContents.send('satztresor-msg', {
         type: 'showToast',
-        message: data.enabled ? '✓ Automatische Textersetzung aktiv' : 'Automatische Textersetzung pausiert',
+        message: data.enabled
+          ? isEn()
+            ? '✓ Auto text expansion active'
+            : '✓ Automatische Textersetzung aktiv'
+          : isEn()
+            ? 'Auto text expansion paused'
+            : 'Automatische Textersetzung pausiert',
       });
       break;
     }
@@ -1706,7 +1872,9 @@ ipcMain.on('satztresor-msg', (event, data) => {
         mainWindow.webContents.send('satztresor-msg', {
           type: 'hotkeyRecorded',
           success: true,
-          message: `✓ ${formatHotkeyLabel(acc)} ist bereits aktiv`,
+          message: isEn()
+            ? `✓ ${formatHotkeyLabel(acc)} is already active`
+            : `✓ ${formatHotkeyLabel(acc)} ist bereits aktiv`,
         });
         break;
       }
@@ -1730,14 +1898,18 @@ ipcMain.on('satztresor-msg', (event, data) => {
         mainWindow.webContents.send('satztresor-msg', {
           type: 'hotkeyRecorded',
           success: true,
-          message: `✓ ${formatHotkeyLabel(acc)} gespeichert`,
+          message: isEn()
+            ? `✓ ${formatHotkeyLabel(acc)} saved`
+            : `✓ ${formatHotkeyLabel(acc)} gespeichert`,
         });
       } else {
         registerHotkeys();
         mainWindow.webContents.send('satztresor-msg', {
           type: 'hotkeyRecorded',
           success: false,
-          message: `⚠️ „${formatHotkeyLabel(acc)}“ ist durch Windows oder ein anderes Programm belegt.`,
+          message: isEn()
+            ? `⚠️ "${formatHotkeyLabel(acc)}" is already in use by Windows or another app.`
+            : `⚠️ „${formatHotkeyLabel(acc)}“ ist durch Windows oder ein anderes Programm belegt.`,
         });
       }
       break;
@@ -1752,7 +1924,7 @@ ipcMain.on('satztresor-msg', (event, data) => {
       updateTrayMenu();
       mainWindow.webContents.send('satztresor-msg', {
         type: 'showToast',
-        message: '✓ Tastenkürzel entfernt',
+        message: isEn() ? '✓ Shortcut removed' : '✓ Tastenkürzel entfernt',
       });
       break;
     }
@@ -1779,12 +1951,12 @@ ipcMain.on('satztresor-msg', (event, data) => {
       if (ok) {
         mainWindow.webContents.send('satztresor-msg', {
           type: 'cryptoSuccess',
-          message: '✓ AES-256 Verschlüsselung aktiviert',
+          message: isEn() ? '✓ AES-256 encryption enabled' : '✓ AES-256 Verschlüsselung aktiviert',
         });
       } else {
         mainWindow.webContents.send('satztresor-msg', {
           type: 'cryptoError',
-          message: 'Fehler beim Verschlüsseln.',
+          message: isEn() ? 'Failed to encrypt database.' : 'Fehler beim Verschlüsseln.',
         });
       }
       break;
@@ -1796,12 +1968,14 @@ ipcMain.on('satztresor-msg', (event, data) => {
         sendDataToRenderer();
         mainWindow.webContents.send('satztresor-msg', {
           type: 'cryptoSuccess',
-          message: '✓ Master-Passwort geändert',
+          message: isEn() ? '✓ Master password updated' : '✓ Master-Passwort geändert',
         });
       } else {
         mainWindow.webContents.send('satztresor-msg', {
           type: 'cryptoError',
-          message: res.error || 'Passwort konnte nicht geändert werden.',
+          message:
+            res.error ||
+            (isEn() ? 'Password could not be changed.' : 'Passwort konnte nicht geändert werden.'),
         });
       }
       break;
@@ -1814,12 +1988,12 @@ ipcMain.on('satztresor-msg', (event, data) => {
         updateTrayMenu();
         mainWindow.webContents.send('satztresor-msg', {
           type: 'cryptoSuccess',
-          message: '✓ Verschlüsselung entfernt',
+          message: isEn() ? '✓ Encryption removed' : '✓ Verschlüsselung entfernt',
         });
       } else {
         mainWindow.webContents.send('satztresor-msg', {
           type: 'cryptoError',
-          message: 'Falsches Master-Passwort!',
+          message: isEn() ? 'Incorrect master password!' : 'Falsches Master-Passwort!',
         });
       }
       break;
@@ -1850,8 +2024,12 @@ ipcMain.on('satztresor-msg', (event, data) => {
       mainWindow.webContents.send('satztresor-msg', {
         type: 'showToast',
         message: enabled
-          ? '✓ Automatische Updates aktiviert'
-          : 'Automatische Updates deaktiviert',
+          ? isEn()
+            ? '✓ Automatic updates enabled'
+            : '✓ Automatische Updates aktiviert'
+          : isEn()
+            ? 'Automatic updates paused'
+            : 'Automatische Updates deaktiviert',
       });
       break;
     }
@@ -1863,12 +2041,20 @@ ipcMain.on('satztresor-msg', (event, data) => {
       if (rawRepo && !saved) {
         mainWindow.webContents.send('satztresor-msg', {
           type: 'showToast',
-          message: 'Bitte Format name/repository verwenden',
+          message: isEn()
+            ? 'Please use owner/repository format'
+            : 'Bitte Format name/repository verwenden',
         });
       } else {
         mainWindow.webContents.send('satztresor-msg', {
           type: 'showToast',
-          message: saved ? `✓ Update-Quelle: ${saved}` : 'Update-Quelle zurückgesetzt',
+          message: saved
+            ? isEn()
+              ? `✓ Update source: ${saved}`
+              : `✓ Update-Quelle: ${saved}`
+            : isEn()
+              ? 'Update source reset'
+              : 'Update-Quelle zurückgesetzt',
         });
         if (saved && updater) {
           updater.checkForUpdates({ manual: true });
@@ -1920,7 +2106,11 @@ function applyThemeAndBoundsAfterUnlock() {
 }
 
 app.whenReady().then(() => {
-  updater = new SatzTresorUpdater({
+  try {
+    storage.setSystemLocale(app.getLocale());
+  } catch (e) {}
+
+  updater = new SnapPhraseUpdater({
     app,
     shell,
     storage,

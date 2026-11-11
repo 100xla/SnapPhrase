@@ -1,8 +1,8 @@
 /**
- * SatzTresor Release Builder (Cloud-Drive Safe + Auto-Update Metadata)
+ * SnapPhrase Release Builder (Cloud-Drive Safe + Auto-Update Metadata)
  * - Auto-syncs GitHub owner/repo from GITHUB_REPOSITORY or `git remote get-url origin` when available
  * - Builds Electron packages in a local OS temp staging directory to prevent EPERM rename locks
- * - Verifies that no personal bausteine.ini or satztresor-ui.json is bundled inside app.asar
+ * - Verifies that no personal bausteine.ini or snapphrase-ui.json / satztresor-ui.json is bundled inside app.asar
  * - Copies finished installers, .blockmap delta maps, and latest.yml into ./dist while removing stale versions
  */
 
@@ -16,7 +16,7 @@ const pkgPath = path.join(projectRoot, 'package.json');
 const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
 const pkgVersion = pkg.version;
 const finalDistDir = path.join(projectRoot, 'dist');
-const stageDir = path.join(os.tmpdir(), 'satztresor-dist-stage');
+const stageDir = path.join(os.tmpdir(), 'snapphrase-dist-stage');
 
 function detectGitHubSlug() {
   if (process.env.GITHUB_REPOSITORY && process.env.GITHUB_REPOSITORY.includes('/')) {
@@ -46,7 +46,7 @@ if (detectedSlug) {
     pkg.build = pkg.build || {};
     pkg.build.publish = [{ provider: 'github', owner, repo, releaseType: 'release' }];
     fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n', 'utf8');
-    console.log(`[SatzTresor Build] Auto-synced GitHub publish target: ${owner}/${repo}`);
+    console.log(`[SnapPhrase Build] Auto-synced GitHub publish target: ${owner}/${repo}`);
   }
 }
 
@@ -60,16 +60,16 @@ if (targets.length === 0) {
 if (shouldPublish) {
   const curPub = Array.isArray(pkg.build?.publish) ? pkg.build.publish[0] : null;
   if (!curPub || !curPub.owner || curPub.owner === 'DEIN-GITHUB-NAME') {
-    console.error('[SatzTresor Build] Bitte zuerst GitHub-Repo setzen: npm run repo -- <name>/<repo>');
+    console.error('[SnapPhrase Build] Bitte zuerst GitHub-Repo setzen: npm run repo -- <name>/<repo>');
     process.exit(1);
   }
   if (!process.env.GH_TOKEN && !process.env.GITHUB_TOKEN) {
-    console.error('[SatzTresor Build] Zum direkten Veröffentlichen fehlt die Umgebungsvariable GH_TOKEN.');
+    console.error('[SnapPhrase Build] Zum direkten Veröffentlichen fehlt die Umgebungsvariable GH_TOKEN.');
     process.exit(1);
   }
 }
 
-console.log(`[SatzTresor Build] Preparing local staging directory: ${stageDir}`);
+console.log(`[SnapPhrase Build] Preparing local staging directory: ${stageDir}`);
 if (fs.existsSync(stageDir)) {
   fs.rmSync(stageDir, { recursive: true, force: true });
 }
@@ -94,7 +94,7 @@ const args = [
 ];
 
 console.log(
-  `[SatzTresor Build] Running: electron-builder --win ${targets.join(' ')} --publish ${shouldPublish ? 'always' : 'never'}`
+  `[SnapPhrase Build] Running: electron-builder --win ${targets.join(' ')} --publish ${shouldPublish ? 'always' : 'never'}`
 );
 const res = spawnSync(process.execPath, args, {
   cwd: projectRoot,
@@ -102,11 +102,11 @@ const res = spawnSync(process.execPath, args, {
 });
 
 if (res.status !== 0) {
-  console.error(`[SatzTresor Build] Build failed with exit code ${res.status}`);
+  console.error(`[SnapPhrase Build] Build failed with exit code ${res.status}`);
   process.exit(res.status || 1);
 }
 
-// Security Gate: Inspect app.asar header to guarantee no personal bausteine.ini or satztresor-ui.json was packaged
+// Security Gate: Inspect app.asar header to guarantee no personal bausteine.ini or UI config was packaged
 const asarPath = path.join(stageDir, 'win-unpacked', 'resources', 'app.asar');
 if (fs.existsSync(asarPath)) {
   const fd = fs.openSync(asarPath, 'r');
@@ -117,11 +117,16 @@ if (fs.existsSync(asarPath)) {
     const headerBuf = Buffer.alloc(headerStrLen);
     fs.readSync(fd, headerBuf, 0, headerStrLen, 16);
     const headerJson = JSON.parse(headerBuf.toString('utf8'));
-    if (headerJson.files && (headerJson.files['bausteine.ini'] || headerJson.files['satztresor-ui.json'])) {
-      console.error('[SatzTresor Build] SECURITY ABORT: personal data/config file was found in app.asar!');
+    if (
+      headerJson.files &&
+      (headerJson.files['bausteine.ini'] ||
+        headerJson.files['snapphrase-ui.json'] ||
+        headerJson.files['satztresor-ui.json'])
+    ) {
+      console.error('[SnapPhrase Build] SECURITY ABORT: personal data/config file was found in app.asar!');
       process.exit(1);
     }
-    console.log('[SatzTresor Build] Security check passed: No personal bausteine.ini or satztresor-ui.json in app.asar.');
+    console.log('[SnapPhrase Build] Security check passed: No personal bausteine.ini or UI config in app.asar.');
   } finally {
     fs.closeSync(fd);
   }
@@ -130,13 +135,14 @@ if (fs.existsSync(asarPath)) {
 if (!fs.existsSync(finalDistDir)) {
   fs.mkdirSync(finalDistDir, { recursive: true });
 } else {
-  // Remove stale installer/portable artifacts from older versions so dist/ stays unambiguous
+  // Remove stale installer/portable artifacts from older versions or old brand names so dist/ stays unambiguous
   for (const existing of fs.readdirSync(finalDistDir)) {
     const ext = path.extname(existing).toLowerCase();
-    if (['.exe', '.appx', '.msix', '.blockmap'].includes(ext) && !existing.includes(`-${pkgVersion}.`)) {
+    const isStaleVersion = !existing.includes(`-${pkgVersion}.`) || existing.toLowerCase().startsWith('satztresor-');
+    if (['.exe', '.appx', '.msix', '.blockmap'].includes(ext) && isStaleVersion) {
       try {
         fs.rmSync(path.join(finalDistDir, existing), { force: true });
-        console.log(`[SatzTresor Build] Removed outdated artifact: dist/${existing}`);
+        console.log(`[SnapPhrase Build] Removed outdated artifact: dist/${existing}`);
       } catch (e) {}
     }
   }
@@ -154,7 +160,7 @@ for (const file of builtFiles) {
     const dest = path.join(finalDistDir, file);
     fs.copyFileSync(src, dest);
     const sizeMb = (fs.statSync(dest).size / (1024 * 1024)).toFixed(2);
-    console.log(`[SatzTresor Build] Ready: dist/${file} (${sizeMb} MB)`);
+    console.log(`[SnapPhrase Build] Ready: dist/${file} (${sizeMb} MB)`);
     copiedCount++;
   }
 }
@@ -164,4 +170,4 @@ try {
   fs.rmSync(stageDir, { recursive: true, force: true });
 } catch (e) {}
 
-console.log(`[SatzTresor Build] Done! ${copiedCount} artifact(s) copied to ./dist`);
+console.log(`[SnapPhrase Build] Done! ${copiedCount} artifact(s) copied to ./dist`);

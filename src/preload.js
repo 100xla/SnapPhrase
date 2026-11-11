@@ -1,5 +1,5 @@
 /**
- * SatzTresor v1.5.6 — Electron Preload Script
+ * SnapPhrase v1.6.0 — Electron Preload Script
  * Secure IPC Bridge between Renderer UI and Main Process.
  */
 
@@ -16,5 +16,6 @@ const api = {
   },
 };
 
+contextBridge.exposeInMainWorld('snapphraseApi', api);
 contextBridge.exposeInMainWorld('satztresorApi', api);
 contextBridge.exposeInMainWorld('quicktabApi', api);

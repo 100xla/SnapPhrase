@@ -1,13 +1,25 @@
 /**
- * SatzTresor v1.5.6 — Renderer Application Logic
+ * SnapPhrase v1.6.0 — Renderer Application Logic
  * Apple-inspired Spotlight UI with token search, smart template prompts, hotstring configuration,
- * automatic background software updates, non-blocking confirmation modals, custom context menu,
- * favorites, and encryption management.
+ * automatic DE/EN localization, background software updates, non-blocking confirmation modals,
+ * custom context menu, favorites, and encryption management.
  */
 
 (function () {
+  function detectBrowserLanguage() {
+    try {
+      const nav = String(navigator.language || 'en').toLowerCase();
+      return nav.startsWith('de') ? 'de' : 'en';
+    } catch (e) {
+      return 'en';
+    }
+  }
+
   const state = {
-    version: '1.5.6',
+    version: '1.6.0',
+    language: 'auto', // 'auto' | 'de' | 'en'
+    effectiveLanguage: detectBrowserLanguage(), // 'de' | 'en'
+    isWindowsStore: false,
     layoutMode: 'center',
     centerCompact: false,
     backdropMode: 'blur', // 'blur' | 'solid' | 'off'
@@ -38,6 +50,10 @@
     updateState: null,
   };
 
+  function isEn() {
+    return state.effectiveLanguage === 'en';
+  }
+
   // DOM Elements
   const screenBackdrop = document.getElementById('screenBackdrop');
   const screenBackdropImg = document.getElementById('screenBackdropImg');
@@ -61,6 +77,7 @@
   const iconShrinkWindow = document.getElementById('iconShrinkWindow');
   const iconExpandWindow = document.getElementById('iconExpandWindow');
   const btnNewSnippetQuick = document.getElementById('btnNewSnippetQuick');
+  const btnNewSnippetLabel = document.getElementById('btnNewSnippetLabel');
   const btnOpenSettings = document.getElementById('btnOpenSettings');
   const btnCollapseWindow = document.getElementById('btnCollapseWindow');
 
@@ -70,10 +87,12 @@
   const promptFieldsContainer = document.getElementById('promptFieldsContainer');
   const btnCancelPrompt = document.getElementById('btnCancelPrompt');
   const btnConfirmPrompt = document.getElementById('btnConfirmPrompt');
+  const btnConfirmPromptLabel = document.getElementById('btnConfirmPromptLabel');
 
   // Snippet Manager Modal
   const managerModal = document.getElementById('managerModal');
   const managerTitle = document.getElementById('managerTitle');
+  const managerSaveShortcutBadge = document.getElementById('managerSaveShortcutBadge');
   const editOriginalTitle = document.getElementById('editOriginalTitle');
   const editTitle = document.getElementById('editTitle');
   const editKuerzel = document.getElementById('editKuerzel');
@@ -91,6 +110,7 @@
 
   // Settings Modal
   const settingsModal = document.getElementById('settingsModal');
+  const languageSegmented = document.getElementById('languageSegmented');
   const settingAutostart = document.getElementById('settingAutostart');
   const settingTheme = document.getElementById('settingTheme');
   const themeSegmented = document.getElementById('themeSegmented');
@@ -122,6 +142,7 @@
   const updateProgressWrap = document.getElementById('updateProgressWrap');
   const updateProgressBar = document.getElementById('updateProgressBar');
   const btnUpdateAction = document.getElementById('btnUpdateAction');
+  const autoUpdateToggleRow = document.getElementById('autoUpdateToggleRow');
   const settingAutoUpdate = document.getElementById('settingAutoUpdate');
   const settingUpdateRepo = document.getElementById('settingUpdateRepo');
   const btnSaveUpdateRepo = document.getElementById('btnSaveUpdateRepo');
@@ -173,7 +194,7 @@
   const ctxDelete = document.getElementById('ctxDelete');
 
   // IPC Helper
-  const ipcBridge = window.satztresorApi || window.quicktabApi;
+  const ipcBridge = window.snapphraseApi || window.satztresorApi || window.quicktabApi;
   function sendIPC(action, payload = {}) {
     const msg = { action, ...payload };
     if (ipcBridge) {
@@ -191,6 +212,313 @@
     });
   }
 
+  function setTextById(id, text) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = text;
+  }
+
+  function applyLanguageUI() {
+    const en = isEn();
+    document.documentElement.lang = en ? 'en' : 'de';
+
+    if (searchInput) {
+      searchInput.placeholder = en ? 'Search snippets...' : 'Satzbaustein suchen...';
+    }
+    if (btnNewSnippetLabel) {
+      btnNewSnippetLabel.textContent = en ? 'New' : 'Neu';
+    }
+    if (btnNewSnippetQuick) {
+      btnNewSnippetQuick.title = en
+        ? 'Create new snippet (Ctrl+N)'
+        : 'Neuen Satzbaustein anlegen (Strg+N)';
+    }
+    if (btnLockNow) {
+      btnLockNow.title = en ? 'Lock database now (Ctrl+L)' : 'Datenbank jetzt sperren (Strg+L)';
+    }
+    if (btnOpenSettings) {
+      btnOpenSettings.title = en ? 'Open settings' : 'Einstellungen öffnen';
+    }
+    if (btnCollapseWindow) {
+      btnCollapseWindow.title = en ? 'Hide window (Esc)' : 'Ausblenden (Esc)';
+    }
+    if (updateReadyPill) {
+      updateReadyPill.title = en
+        ? 'Install update now and restart'
+        : 'Update jetzt installieren und neu starten';
+    }
+
+    // Footer hints
+    setTextById('hintInsert', en ? 'Insert' : 'Einfügen');
+    setTextById('hintCopyKbd', en ? 'Shift+↵' : 'Umschalt+↵');
+    setTextById('hintCopy', en ? 'Copy' : 'Kopieren');
+    setTextById('hintEdit', en ? 'Edit' : 'Bearbeiten');
+    setTextById('hintNewKbd', en ? 'Ctrl+N' : 'Strg+N');
+    setTextById('hintNew', en ? 'New' : 'Neu');
+    setTextById('hintClose', en ? 'Close' : 'Schließen');
+
+    // Context menu
+    setTextById('ctxInsertLabel', en ? 'Insert' : 'Einfügen');
+    setTextById('ctxCopyLabel', en ? 'Copy only' : 'Nur kopieren');
+    setTextById('ctxEditLabel', en ? 'Edit…' : 'Bearbeiten…');
+    setTextById('ctxDuplicateLabel', en ? 'Duplicate' : 'Duplizieren');
+    setTextById('ctxDeleteLabel', en ? 'Delete…' : 'Löschen…');
+
+    // Prompt modal
+    if (btnCancelPrompt) btnCancelPrompt.textContent = en ? 'Cancel' : 'Abbrechen';
+    if (btnConfirmPromptLabel) btnConfirmPromptLabel.textContent = en ? 'Insert' : 'Einfügen';
+
+    // Manager modal
+    if (managerSaveShortcutBadge) {
+      managerSaveShortcutBadge.textContent = en ? 'Ctrl+S' : 'Strg+S';
+    }
+    setTextById('editTitleLabel', en ? 'Title' : 'Titel');
+    if (editTitle) {
+      editTitle.placeholder = en ? 'e.g. Friendly sign-off' : 'z. B. Freundliche Grußformel';
+    }
+    setTextById('editKuerzelLabel', en ? 'Trigger' : 'Kürzel');
+    setTextById('editCategoryLabelText', en ? 'Category' : 'Kategorie');
+    setTextById('editCategoryOptionalLabel', '(optional)');
+    if (editCategory) {
+      editCategory.placeholder = en
+        ? 'e.g. Email, Sales, Support'
+        : 'z. B. E-Mail, Angebot, Support';
+    }
+    setTextById('quickAccessLabel', en ? 'Quick Access' : 'Schnellzugriff');
+    setTextById('editContentLabel', en ? 'Snippet Content' : 'Textinhalt');
+    setTextById(
+      'editContentHint',
+      en ? 'Click to insert dynamic placeholders' : 'Dynamische Platzhalter per Klick einfügen'
+    );
+    if (editContent) {
+      editContent.placeholder = en
+        ? 'Write or paste your text snippet here…'
+        : 'Schreibe oder kopiere hier deinen Textbaustein hinein…';
+    }
+
+    // Template chips
+    const chipConfigs = [
+      {
+        id: 'chipCursor',
+        insert: '{cursor}',
+        label: en ? 'Cursor Position' : 'Cursor-Position',
+        title: en
+          ? 'Places the typing cursor at this exact position after pasting ({cursor})'
+          : 'Setzt den Schreibcursor nach dem Einfügen exakt an diese Stelle ({cursor})',
+      },
+      {
+        id: 'chipDateToday',
+        insert: en ? '{date}' : '{datum}',
+        label: en ? 'Today' : 'Datum heute',
+        title: en ? 'Insert current date ({date})' : 'Aktuelles Datum einfügen ({datum})',
+      },
+      {
+        id: 'chipDateTomorrow',
+        insert: en ? '{date:+1d}' : '{datum:+1d}',
+        label: en ? 'Tomorrow' : 'Morgen',
+        title: en ? "Insert tomorrow's date ({date:+1d})" : 'Morgiges Datum einfügen ({datum:+1d})',
+      },
+      {
+        id: 'chipWeekday',
+        insert: en ? '{weekday}' : '{wochentag}',
+        label: en ? 'Weekday' : 'Wochentag',
+        title: en ? 'Insert current weekday ({weekday})' : 'Aktuellen Wochentag einfügen ({wochentag})',
+      },
+      {
+        id: 'chipTime',
+        insert: en ? '{time}' : '{zeit}',
+        label: en ? 'Time' : 'Uhrzeit',
+        title: en ? 'Insert current time ({time})' : 'Aktuelle Uhrzeit einfügen ({zeit})',
+      },
+      {
+        id: 'chipClipboard',
+        insert: '{clipboard}',
+        label: en ? 'Clipboard' : 'Zwischenablage',
+        title: en
+          ? 'Insert previously copied clipboard text ({clipboard})'
+          : 'Vorher kopierten Text aus der Zwischenablage einfügen ({clipboard})',
+      },
+      {
+        id: 'chipPromptField',
+        insert: '{?Name}',
+        label: en ? 'Input Prompt' : 'Eingabefeld',
+        title: en
+          ? 'Prompts for a custom text value before pasting ({?Name})'
+          : 'Fragt beim Einfügen einen freien Textwert ab ({?Name})',
+      },
+      {
+        id: 'chipSelectField',
+        insert: en ? '{?Salutation=Ms.|Mr.|Hello}' : '{?Anrede=Frau|Herr|Guten Tag}',
+        label: en ? 'Dropdown Menu' : 'Auswahlmenü',
+        title: en
+          ? 'Shows a selection dropdown before pasting ({?Salutation=Ms.|Mr.|Hello})'
+          : 'Zeigt beim Einfügen ein Auswahlmenü ({?Anrede=Frau|Herr|Guten Tag})',
+      },
+    ];
+    chipConfigs.forEach((cfg) => {
+      const chip = document.getElementById(cfg.id);
+      if (chip) {
+        chip.dataset.insert = cfg.insert;
+        chip.textContent = cfg.label;
+        chip.title = cfg.title;
+      }
+    });
+
+    if (btnDeleteSnippet) btnDeleteSnippet.textContent = en ? 'Delete' : 'Löschen';
+    if (btnDuplicateFromManager) btnDuplicateFromManager.textContent = en ? 'Duplicate' : 'Duplizieren';
+    if (btnCancelManager) btnCancelManager.textContent = en ? 'Cancel' : 'Abbrechen';
+    if (btnSaveSnippet) btnSaveSnippet.textContent = en ? 'Save' : 'Speichern';
+
+    // Settings Modal
+    setTextById('settingsModalTitle', en ? 'Settings' : 'Einstellungen');
+    setTextById('settingsHeaderAppearance', en ? 'Appearance & System' : 'Darstellung & System');
+    setTextById('settingLanguageTitle', en ? 'Language' : 'Sprache');
+    setTextById(
+      'settingLanguageDesc',
+      en
+        ? 'Automatic by Windows language or select manually'
+        : 'Automatisch nach Windows-Sprache oder manuell wählen'
+    );
+    setTextById('settingAutostartTitle', en ? 'Start with Windows' : 'Mit Windows starten');
+    setTextById(
+      'settingAutostartDesc',
+      en
+        ? 'Launch automatically in the background when signing in'
+        : 'Beim Anmelden automatisch im Hintergrund bereitstellen'
+    );
+    setTextById('settingThemeTitle', en ? 'Theme' : 'Erscheinungsbild');
+    setTextById('settingThemeDesc', en ? 'Interface color scheme' : 'Farbschema der Oberfläche');
+    setTextById('themeBtnDark', en ? 'Dark' : 'Dunkel');
+    setTextById('themeBtnLight', en ? 'Light' : 'Hell');
+    setTextById('settingBackdropTitle', en ? 'Background Focus' : 'Hintergrund-Fokus');
+    setTextById(
+      'settingBackdropDesc',
+      en
+        ? 'Calmly dim or blur the desktop behind the search window'
+        : 'Desktop hinter dem Suchfenster ruhig ausblenden'
+    );
+    setTextById('backdropBtnBlur', en ? 'Acrylic' : 'Milchglas');
+    setTextById('backdropBtnSolid', en ? 'Dimmed' : 'Dunkel');
+    setTextById('backdropBtnOff', en ? 'Off' : 'Aus');
+    setTextById('labelBlurStrength', en ? 'Blur' : 'Unschärfe');
+    setTextById('labelDimStrength', en ? 'Dimming' : 'Abdunklung');
+    setTextById('settingRestoreClipTitle', en ? 'Preserve Clipboard' : 'Zwischenablage beibehalten');
+    setTextById(
+      'settingRestoreClipDesc',
+      en
+        ? 'Restore previously copied clipboard content after pasting'
+        : 'Vorher kopierten Inhalt nach dem Einfügen wiederherstellen'
+    );
+
+    setTextById('settingsHeaderTriggers', en ? 'Shortcuts & Auto-Type' : 'Aufruf & Textersetzung');
+    setTextById('settingDoubleTapTitle', en ? 'Double-tap Ctrl' : '2× kurz Strg drücken');
+    setTextById(
+      'settingDoubleTapDesc',
+      en ? 'Opens SnapPhrase instantly from any app' : 'Öffnet SnapPhrase sofort aus jedem Programm'
+    );
+    setTextById('settingHotkeysTitle', en ? 'Global Hotkeys' : 'Tastenkürzel');
+    setTextById(
+      'settingHotkeysDesc',
+      en
+        ? 'Additional global keyboard shortcuts to open SnapPhrase'
+        : 'Zusätzliche globale Tastenkombination zum Öffnen'
+    );
+    setTextById('settingHotstringsTitle', en ? 'Automatic Text Expansion' : 'Automatische Textersetzung');
+    setTextById('settingPrefixTitle', en ? 'Trigger Prefix' : 'Auslöse-Präfix');
+    setTextById(
+      'settingPrefixDesc',
+      en
+        ? 'Prevents accidental expansion inside normal words'
+        : 'Verhindert versehentliches Ersetzen mitten im Wort'
+    );
+    setTextById('prefixOpt1', en ? ';; (e.g. ;;br)' : ';; (z. B. ;;mfg)');
+    setTextById('prefixOpt2', en ? '// (e.g. //br)' : '// (z. B. //mfg)');
+    setTextById('prefixOpt3', en ? ':: (e.g. ::br)' : ':: (z. B. ::mfg)');
+    setTextById('prefixOpt4', en ? '# (e.g. #br)' : '# (z. B. #mfg)');
+    setTextById('prefixOptNone', en ? 'No prefix' : 'Ohne Präfix');
+
+    setTextById('settingsHeaderVault', en ? 'Data & Security' : 'Daten & Tresor');
+    setTextById('settingBackupTitle', en ? 'Backup & Restore Snippets' : 'Bausteine sichern & laden');
+    setTextById(
+      'settingBackupDesc',
+      en
+        ? 'Export all snippets to a backup file or import an existing one'
+        : 'Alle Bausteine in einer Datei sichern oder wiederherstellen'
+    );
+    setTextById('btnImportLabel', en ? 'Import' : 'Importieren');
+    setTextById('btnExportLabel', en ? 'Export' : 'Exportieren');
+    if (btnOpenDataFolder) {
+      btnOpenDataFolder.title = en
+        ? 'Open local storage folder in Explorer'
+        : 'Lokalen Speicherordner im Explorer öffnen';
+    }
+    setTextById('settingCryptoTitle', en ? 'Password Protection (AES-256)' : 'Passwortschutz (AES-256)');
+    setTextById('btnLockFromSettingsLabel', en ? 'Lock' : 'Sperren');
+
+    setTextById('settingsHeaderUpdate', en ? 'Software Update' : 'Softwareupdate');
+    setTextById('settingAutoUpdateTitle', en ? 'Update automatically' : 'Automatisch aktualisieren');
+    setTextById(
+      'settingAutoUpdateDesc',
+      en
+        ? 'Download new versions in the background and install on exit'
+        : 'Neue Versionen im Hintergrund laden und beim Beenden installieren'
+    );
+    if (btnCloseSettings) btnCloseSettings.textContent = en ? 'Done' : 'Fertig';
+
+    // Unlock Modal
+    setTextById('unlockModalTitle', en ? 'Unlock SnapPhrase' : 'SnapPhrase entsperren');
+    setTextById(
+      'unlockModalDesc',
+      en
+        ? 'Your database is encrypted. Please enter your master password:'
+        : 'Die Datenbank ist verschlüsselt. Bitte gib dein Master-Passwort ein:'
+    );
+    if (unlockPassword) {
+      unlockPassword.placeholder = en ? 'Enter master password...' : 'Master-Passwort eingeben...';
+    }
+    if (btnExitUnlock) btnExitUnlock.textContent = en ? 'Close' : 'Schließen';
+    if (btnSubmitUnlock) btnSubmitUnlock.textContent = en ? 'Unlock' : 'Entsperren';
+
+    // Crypto Modal
+    if (tabChangePw) tabChangePw.textContent = en ? 'Change Password' : 'Passwort ändern';
+    if (tabRemoveCrypto) tabRemoveCrypto.textContent = en ? 'Remove Protection' : 'Schutz aufheben';
+    setTextById('labelCryptoNewPw', en ? 'New Master Password' : 'Neues Master-Passwort');
+    if (cryptoNewPw) cryptoNewPw.placeholder = en ? 'Enter password...' : 'Passwort eingeben...';
+    setTextById('labelCryptoConfirmPw', en ? 'Confirm Password' : 'Passwort wiederholen');
+    if (cryptoConfirmPw) cryptoConfirmPw.placeholder = en ? 'Confirm password...' : 'Passwort bestätigen...';
+    setTextById('labelCryptoOldPw', en ? 'Current Master Password' : 'Aktuelles Master-Passwort');
+    if (cryptoOldPw) cryptoOldPw.placeholder = en ? 'Current password...' : 'Bisheriges Passwort...';
+    setTextById('labelCryptoChangeNewPw', en ? 'New Master Password' : 'Neues Master-Passwort');
+    if (cryptoChangeNewPw) cryptoChangeNewPw.placeholder = en ? 'New password...' : 'Neues Passwort...';
+    setTextById('labelCryptoChangeConfirmPw', en ? 'Confirm New Password' : 'Neues Passwort wiederholen');
+    if (cryptoChangeConfirmPw) {
+      cryptoChangeConfirmPw.placeholder = en ? 'Confirm new password...' : 'Neues Passwort bestätigen...';
+    }
+    setTextById('labelCryptoCurrentPw', en ? 'Current Master Password' : 'Aktuelles Master-Passwort');
+    if (cryptoCurrentPw) {
+      cryptoCurrentPw.placeholder = en
+        ? 'Enter master password to remove encryption...'
+        : 'Master-Passwort zum Entfernen eingeben...';
+    }
+    if (btnCancelCrypto) btnCancelCrypto.textContent = en ? 'Cancel' : 'Abbrechen';
+    if (btnApplyCrypto) btnApplyCrypto.textContent = en ? 'Confirm' : 'Bestätigen';
+
+    if (!state.isRecordingHotkey && btnRecordHotkey) {
+      btnRecordHotkey.textContent = en ? '+ Record shortcut' : '+ Kürzel aufnehmen';
+    }
+
+    syncSegmentedControls();
+    updatePinUI();
+    updateSecurityButtonsUI();
+    updateHotstringUI();
+    syncEditFavoriteButtonUI();
+    renderActiveHotkeys();
+    renderUpdateUI();
+    renderedCategoriesKey = '';
+    lastRenderedListKey = '';
+    renderCategories();
+    filterAndRender();
+  }
+
   function computeEffectiveHotstring(rawKuerzel, prefix) {
     const k = String(rawKuerzel || '').trim();
     if (!k) return '';
@@ -200,10 +528,10 @@
   }
 
   function showConfirmDialog({
-    title = 'Bestätigen',
+    title = isEn() ? 'Confirm' : 'Bestätigen',
     message = '',
     confirmText = 'OK',
-    cancelText = 'Abbrechen',
+    cancelText = isEn() ? 'Cancel' : 'Abbrechen',
     showCancel = true,
     danger = false,
   }) {
@@ -242,10 +570,25 @@
 
     switch (data.type) {
       case 'init':
-      case 'updateData':
+      case 'updateData': {
         if (data.version) {
           state.version = data.version;
           versionTag.textContent = 'v' + data.version;
+        }
+        let langChanged = false;
+        if (typeof data.language === 'string') {
+          state.language = data.language;
+        }
+        if (typeof data.effectiveLanguage === 'string') {
+          if (state.effectiveLanguage !== data.effectiveLanguage) {
+            langChanged = true;
+          }
+          state.effectiveLanguage = data.effectiveLanguage;
+        } else if (state.language === 'de' || state.language === 'en') {
+          state.effectiveLanguage = state.language;
+        }
+        if (typeof data.isWindowsStore !== 'undefined') {
+          state.isWindowsStore = !!data.isWindowsStore;
         }
         state.layoutMode = 'center';
         if (typeof data.isPinned !== 'undefined') {
@@ -324,11 +667,17 @@
           state.updateState = data.updateState;
           renderUpdateUI();
         }
-        updateSecurityButtonsUI();
-        updateHotstringUI();
-        renderActiveHotkeys();
-        filterAndRender();
+        if (langChanged || data.type === 'init') {
+          applyLanguageUI();
+        } else {
+          syncSegmentedControls();
+          updateSecurityButtonsUI();
+          updateHotstringUI();
+          renderActiveHotkeys();
+          filterAndRender();
+        }
         break;
+      }
 
       case 'updateStatus':
         if (data.updateState) {
@@ -448,24 +797,26 @@
         unlockModal.classList.remove('active');
         state.isLocked = false;
         updateSecurityButtonsUI();
-        showToast('✓ Entsperrt');
+        showToast(isEn() ? '✓ Unlocked' : '✓ Entsperrt');
         searchInput.value = '';
         searchInput.focus();
         break;
 
       case 'unlockError':
-        unlockError.textContent = data.message || 'Falsches Master-Passwort!';
+        unlockError.textContent =
+          data.message || (isEn() ? 'Incorrect master password!' : 'Falsches Master-Passwort!');
         unlockPassword.select();
         break;
 
       case 'cryptoSuccess':
         cryptoModal.classList.remove('active');
-        showToast(data.message || '✓ Gespeichert');
+        showToast(data.message || (isEn() ? '✓ Saved' : '✓ Gespeichert'));
         searchInput.focus();
         break;
 
       case 'cryptoError':
-        cryptoError.textContent = data.message || 'Fehler bei der Verschlüsselung.';
+        cryptoError.textContent =
+          data.message || (isEn() ? 'Encryption error.' : 'Fehler bei der Verschlüsselung.');
         break;
 
       case 'manageEncryption':
@@ -503,18 +854,27 @@
 
       case 'hotkeyRecorded':
         stopHotkeyRecording(false);
-        showToast(data.message || (data.success ? '✓ Gespeichert' : 'Nicht verfügbar'));
+        showToast(
+          data.message ||
+            (data.success
+              ? isEn()
+                ? '✓ Saved'
+                : '✓ Gespeichert'
+              : isEn()
+                ? 'Unavailable'
+                : 'Nicht verfügbar')
+        );
         break;
 
       case 'showToast':
-        showToast(data.message || '✓ Fertig');
+        showToast(data.message || (isEn() ? '✓ Done' : '✓ Fertig'));
         break;
 
       case 'showAppAlert':
         showConfirmDialog({
-          title: data.title || 'Hinweis',
+          title: data.title || (isEn() ? 'Notice' : 'Hinweis'),
           message: data.message || '',
-          confirmText: 'Verstanden',
+          confirmText: isEn() ? 'Got it' : 'Verstanden',
           showCancel: false,
         });
         break;
@@ -522,6 +882,7 @@
   }
 
   function updateSecurityButtonsUI() {
+    const en = isEn();
     const canLock = state.isEncrypted && !state.isLocked;
     if (btnLockNow) {
       btnLockNow.style.display = canLock ? 'flex' : 'none';
@@ -531,17 +892,28 @@
     }
     if (cryptoSettingsStatusDesc) {
       cryptoSettingsStatusDesc.textContent = state.isEncrypted
-        ? 'Aktiv — Datenbank ist lokal mit Master-Passwort geschützt'
-        : 'Datenbank lokal mit einem Master-Passwort verschlüsseln';
+        ? en
+          ? 'Active — Database is protected locally with a master password'
+          : 'Aktiv — Datenbank ist lokal mit Master-Passwort geschützt'
+        : en
+          ? 'Encrypt your local snippet database with a master password'
+          : 'Datenbank lokal mit einem Master-Passwort verschlüsseln';
       cryptoSettingsStatusDesc.classList.toggle('status-active', !!state.isEncrypted);
     }
     if (cryptoSettingsBtnLabel) {
-      cryptoSettingsBtnLabel.textContent = state.isEncrypted ? 'Verwalten…' : 'Einrichten…';
+      cryptoSettingsBtnLabel.textContent = state.isEncrypted
+        ? en
+          ? 'Manage…'
+          : 'Verwalten…'
+        : en
+          ? 'Set up…'
+          : 'Einrichten…';
     }
   }
 
   function updateEditKuerzelLiveBadge() {
     if (!editKuerzelLiveBadge || !editKuerzel) return;
+    const en = isEn();
     const raw = editKuerzel.value.trim();
     if (!raw) {
       editKuerzelLiveBadge.textContent = 'Optional';
@@ -550,26 +922,39 @@
     }
     if (state.hotstringsEnabled) {
       const eff = computeEffectiveHotstring(raw, state.hotstringPrefix);
-      editKuerzelLiveBadge.textContent = `Tippe ${eff}`;
+      editKuerzelLiveBadge.textContent = en ? `Type ${eff}` : `Tippe ${eff}`;
       editKuerzelLiveBadge.classList.add('active');
     } else {
-      editKuerzelLiveBadge.textContent = `Suchkürzel: ${raw}`;
+      editKuerzelLiveBadge.textContent = en ? `Search keyword: ${raw}` : `Suchkürzel: ${raw}`;
       editKuerzelLiveBadge.classList.add('active');
     }
   }
 
   function updateHotstringUI() {
-    const ex = computeEffectiveHotstring('mfg', state.hotstringPrefix);
+    const en = isEn();
+    const sampleShort = en ? 'br' : 'mfg';
+    const ex = computeEffectiveHotstring(sampleShort, state.hotstringPrefix);
     if (hotstringStatusPill) {
       hotstringStatusPill.classList.toggle('active', state.hotstringsEnabled);
+      const pillText = state.hotstringsEnabled
+        ? en
+          ? 'Auto-Type'
+          : 'Auto-Tippen'
+        : en
+          ? 'Auto-Type off'
+          : 'Auto-Tippen aus';
       if (hotstringStatusLabel) {
-        hotstringStatusLabel.textContent = state.hotstringsEnabled ? 'Auto-Tippen' : 'Auto-Tippen aus';
+        hotstringStatusLabel.textContent = pillText;
       } else {
-        hotstringStatusPill.textContent = state.hotstringsEnabled ? 'Auto-Tippen' : 'Auto-Tippen aus';
+        hotstringStatusPill.textContent = pillText;
       }
       hotstringStatusPill.title = state.hotstringsEnabled
-        ? `Automatische Textersetzung aktiv (z. B. ${ex}) — Klicken zum Pausieren`
-        : 'Automatische Textersetzung ist pausiert — Klicken zum Aktivieren';
+        ? en
+          ? `Automatic text expansion active (e.g. ${ex}) — Click to pause`
+          : `Automatische Textersetzung aktiv (z. B. ${ex}) — Klicken zum Pausieren`
+        : en
+          ? 'Automatic text expansion is paused — Click to enable'
+          : 'Automatische Textersetzung ist pausiert — Klicken zum Aktivieren';
     }
     if (settingHotstringsEnabled) {
       settingHotstringsEnabled.checked = state.hotstringsEnabled;
@@ -582,28 +967,35 @@
       hotstringPrefixRow.style.pointerEvents = state.hotstringsEnabled ? 'auto' : 'none';
     }
     if (hotstringDescPreview) {
-      hotstringDescPreview.textContent = `Ersetzt Kürzel wie ${ex} direkt während des Tippens`;
+      hotstringDescPreview.textContent = en
+        ? `Expands triggers like ${ex} automatically while typing`
+        : `Ersetzt Kürzel wie ${ex} direkt während des Tippens`;
     }
     if (editKuerzel) {
       editKuerzel.placeholder = state.hotstringPrefix
-        ? `z. B. mfg (wird zu ${ex})`
-        : 'z. B. ;;mfg';
+        ? en
+          ? `e.g. ${sampleShort} (becomes ${ex})`
+          : `z. B. ${sampleShort} (wird zu ${ex})`
+        : en
+          ? `e.g. ;;${sampleShort}`
+          : `z. B. ;;${sampleShort}`;
     }
     updateEditKuerzelLiveBadge();
   }
 
   function formatHotkeyLabel(acc) {
+    const en = isEn();
     return String(acc || '')
       .split('+')
       .map((part) => {
         const p = part.trim();
-        if (p === 'Control' || p === 'CommandOrControl') return 'Strg';
-        if (p === 'Shift') return 'Umschalt';
+        if (p === 'Control' || p === 'CommandOrControl') return en ? 'Ctrl' : 'Strg';
+        if (p === 'Shift') return en ? 'Shift' : 'Umschalt';
         if (p === 'Super' || p === 'Meta') return 'Win';
-        if (p === 'Space') return 'Leertaste';
-        if (p === 'ScrollLock') return 'Rollen';
-        if (p === 'Insert') return 'Einfg';
-        if (p === 'Delete') return 'Entf';
+        if (p === 'Space') return en ? 'Space' : 'Leertaste';
+        if (p === 'ScrollLock') return en ? 'ScrollLock' : 'Rollen';
+        if (p === 'Insert') return en ? 'Ins' : 'Einfg';
+        if (p === 'Delete') return en ? 'Del' : 'Entf';
         if (p === 'Plus') return '+';
         if (p === 'Up') return '↑';
         if (p === 'Down') return '↓';
@@ -617,11 +1009,12 @@
   function renderActiveHotkeys() {
     if (!activeHotkeysList) return;
     activeHotkeysList.innerHTML = '';
+    const en = isEn();
 
     if (!state.activeHotkeys || state.activeHotkeys.length === 0) {
       const empty = document.createElement('span');
       empty.className = 'hotkey-empty-hint';
-      empty.textContent = 'Kein Tastenkürzel aktiv';
+      empty.textContent = en ? 'No shortcut active' : 'Kein Tastenkürzel aktiv';
       activeHotkeysList.appendChild(empty);
       return;
     }
@@ -637,7 +1030,7 @@
       const removeBtn = document.createElement('button');
       removeBtn.type = 'button';
       removeBtn.className = 'hotkey-chip-remove';
-      removeBtn.title = `${formatHotkeyLabel(acc)} entfernen`;
+      removeBtn.title = en ? `Remove ${formatHotkeyLabel(acc)}` : `${formatHotkeyLabel(acc)} entfernen`;
       removeBtn.textContent = '×';
       removeBtn.addEventListener('click', () => {
         sendIPC('removeHotkey', { accelerator: acc });
@@ -652,7 +1045,9 @@
     state.isRecordingHotkey = true;
     if (btnRecordHotkey) {
       btnRecordHotkey.classList.add('recording');
-      btnRecordHotkey.textContent = 'Taste drücken… (Esc = Abbruch)';
+      btnRecordHotkey.textContent = isEn()
+        ? 'Press keys… (Esc = Cancel)'
+        : 'Taste drücken… (Esc = Abbruch)';
       btnRecordHotkey.focus();
     }
     sendIPC('pauseHotkeys', { paused: true });
@@ -663,7 +1058,7 @@
     state.isRecordingHotkey = false;
     if (btnRecordHotkey) {
       btnRecordHotkey.classList.remove('recording');
-      btnRecordHotkey.textContent = '+ Kürzel aufnehmen';
+      btnRecordHotkey.textContent = isEn() ? '+ Record shortcut' : '+ Kürzel aufnehmen';
     }
     if (wasRecording && notifyBackend) {
       sendIPC('pauseHotkeys', { paused: false });
@@ -671,6 +1066,7 @@
   }
 
   function buildAcceleratorFromKeyEvent(e) {
+    const en = isEn();
     const ignored = new Set([
       'Control',
       'Shift',
@@ -699,7 +1095,9 @@
     if (e.key === 'Pause') {
       return {
         status: 'invalid',
-        reason: '⚠️ Die Pause-Taste wird unter Windows nicht als globales Kürzel unterstützt.',
+        reason: en
+          ? '⚠️ The Pause key is not supported as a global hotkey on Windows.'
+          : '⚠️ Die Pause-Taste wird unter Windows nicht als globales Kürzel unterstützt.',
       };
     }
 
@@ -745,7 +1143,9 @@
     if (!mainKey) {
       return {
         status: 'invalid',
-        reason: '⚠️ Diese Sondertaste kann nicht als globales Kürzel verwendet werden.',
+        reason: en
+          ? '⚠️ This special key cannot be used as a global shortcut.'
+          : '⚠️ Diese Sondertaste kann nicht als globales Kürzel verwendet werden.',
       };
     }
 
@@ -757,7 +1157,9 @@
     if (!safeStandalone && !hasCtrl && !hasAlt && !hasMeta) {
       return {
         status: 'needs_modifier',
-        reason: '⚠️ Bitte mit Strg oder Alt kombinieren (oder F-Taste / Rollen nutzen).',
+        reason: en
+          ? '⚠️ Please combine with Ctrl or Alt (or use an F-key / ScrollLock).'
+          : '⚠️ Bitte mit Strg oder Alt kombinieren (oder F-Taste / Rollen nutzen).',
       };
     }
 
@@ -772,6 +1174,12 @@
   }
 
   function syncSegmentedControls() {
+    if (languageSegmented) {
+      const langVal = state.language || 'auto';
+      languageSegmented.querySelectorAll('[data-lang-val]').forEach((btn) => {
+        btn.classList.toggle('active', btn.dataset.langVal === langVal);
+      });
+    }
     if (themeSegmented) {
       themeSegmented.querySelectorAll('[data-theme-val]').forEach((btn) => {
         btn.classList.toggle('active', btn.dataset.themeVal === state.theme);
@@ -861,13 +1269,18 @@
 
   function updateWidthToggleButtonUI() {
     if (!btnToggleWidth) return;
+    const en = isEn();
     const isCompact = !!state.centerCompact;
     btnToggleWidth.classList.remove('active');
     if (iconShrinkWindow) iconShrinkWindow.style.display = isCompact ? 'none' : 'block';
     if (iconExpandWindow) iconExpandWindow.style.display = isCompact ? 'block' : 'none';
     btnToggleWidth.title = isCompact
-      ? 'Großansicht (1120×780) aktivieren'
-      : 'Kompaktansicht (580×380) aktivieren';
+      ? en
+        ? 'Switch to large view (1120×780)'
+        : 'Großansicht (1120×780) aktivieren'
+      : en
+        ? 'Switch to compact view (580×380)'
+        : 'Kompaktansicht (580×380) aktivieren';
   }
 
   function updateLayoutUI() {
@@ -877,11 +1290,16 @@
 
   function updatePinUI() {
     syncBodyClasses();
+    const en = isEn();
     if (btnPinWindow) {
       btnPinWindow.classList.toggle('active', !!state.isPinned);
       btnPinWindow.title = state.isPinned
-        ? '📌 SatzTresor ist im Vordergrund fixiert (Klicken zum Lösen in den Spotlight-Modus)'
-        : 'SatzTresor dauerhaft im Vordergrund fixieren (ohne Hintergrund-Abdunklung)';
+        ? en
+          ? '📌 SnapPhrase is pinned on top (Ctrl+P or click to unpin)'
+          : '📌 SnapPhrase ist im Vordergrund fixiert (Strg+P oder Klicken zum Lösen)'
+        : en
+          ? 'Pin SnapPhrase on top (Ctrl+P)'
+          : 'SnapPhrase dauerhaft im Vordergrund fixieren (Strg+P)';
     }
     updateWidthToggleButtonUI();
   }
@@ -907,7 +1325,6 @@
     wasEffectivelyVisible = false,
   } = {}) {
     if (state.isPinned || wasEffectivelyVisible || !wasHidden) {
-      // Either pinned, already open, or interrupted mid-close: smoothly transition without snapping to 0
       document.body.classList.remove('no-anim', 'window-closing');
       document.body.classList.add('window-visible');
       focusDefaultControl(shouldFocusDefault);
@@ -967,6 +1384,7 @@
 
   function formatRelativeTime(ts) {
     if (!ts || ts.length < 14) return '';
+    const en = isEn();
     const y = parseInt(ts.substring(0, 4), 10);
     const m = parseInt(ts.substring(4, 6), 10) - 1;
     const d = parseInt(ts.substring(6, 8), 10);
@@ -974,16 +1392,24 @@
     const min = parseInt(ts.substring(10, 12), 10);
     const date = new Date(y, m, d, h, min);
     const diffSec = Math.floor((Date.now() - date.getTime()) / 1000);
-    if (diffSec < 60) return 'Gerade eben';
-    if (diffSec < 3600) return `vor ${Math.floor(diffSec / 60)} Min`;
-    if (diffSec < 86400) return `vor ${Math.floor(diffSec / 3600)} Std`;
-    if (diffSec < 172800) return 'Gestern';
+    if (diffSec < 60) return en ? 'Just now' : 'Gerade eben';
+    if (diffSec < 3600) {
+      const mins = Math.floor(diffSec / 60);
+      return en ? `${mins}m ago` : `vor ${mins} Min`;
+    }
+    if (diffSec < 86400) {
+      const hrs = Math.floor(diffSec / 3600);
+      return en ? `${hrs}h ago` : `vor ${hrs} Std`;
+    }
+    if (diffSec < 172800) return en ? 'Yesterday' : 'Gestern';
     const days = Math.floor(diffSec / 86400);
-    if (days < 30) return `vor ${days} Tagen`;
-    return `${String(d).padStart(2, '0')}.${String(m + 1).padStart(2, '0')}.${y}`;
+    if (days < 30) return en ? `${days}d ago` : `vor ${days} Tagen`;
+    return en
+      ? `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+      : `${String(d).padStart(2, '0')}.${String(m + 1).padStart(2, '0')}.${y}`;
   }
 
-  // Categories rendering (avoids unnecessary DOM rebuilds when category list is unchanged)
+  // Categories rendering
   let renderedCategoriesKey = '';
   if (categoriesBar) {
     categoriesBar.addEventListener(
@@ -999,17 +1425,18 @@
   }
 
   function renderCategories() {
+    const en = isEn();
     const baseCategoryConfig = {
       '[ Alle ]': {
-        label: 'Alle',
+        label: en ? 'All' : 'Alle',
         svg: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect></svg>',
       },
       '[ ⭐ Favoriten ]': {
-        label: 'Favoriten',
+        label: en ? 'Favorites' : 'Favoriten',
         svg: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>',
       },
       '[ 🕒 Zuletzt ]': {
-        label: 'Zuletzt',
+        label: en ? 'Recent' : 'Zuletzt',
         svg: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><polyline points="12 7 12 12 15.5 14"></polyline></svg>',
       },
     };
@@ -1018,7 +1445,7 @@
       state.activeCategory = '[ Alle ]';
     }
 
-    const nextKey = JSON.stringify(state.categories);
+    const nextKey = `${state.effectiveLanguage}|${JSON.stringify(state.categories)}`;
     if (nextKey === renderedCategoriesKey && categoriesBar.children.length > 0) {
       Array.from(categoriesBar.children).forEach((btn) => {
         btn.classList.toggle('active', btn.dataset.cat === state.activeCategory);
@@ -1143,8 +1570,9 @@
   let renderedSelectedCardIndex = -1;
 
   function renderList() {
+    const en = isEn();
     const rawQuery = searchInput.value.trim().toLowerCase();
-    const nextListKey = `${snippetsDataRevision}|${state.activeCategory}|${rawQuery}|${state.hotstringsEnabled ? '1' : '0'}|${state.hotstringPrefix}`;
+    const nextListKey = `${snippetsDataRevision}|${state.effectiveLanguage}|${state.activeCategory}|${rawQuery}|${state.hotstringsEnabled ? '1' : '0'}|${state.hotstringPrefix}`;
 
     if (state.filteredSnippets.length === 0) {
       renderedSelectedCardIndex = -1;
@@ -1166,31 +1594,35 @@
       actionsEl.className = 'empty-actions';
 
       if (state.snippets.length === 0) {
-        titleEl.textContent = 'Noch keine Bausteine vorhanden';
-        hintEl.textContent = 'Lege deinen ersten Satzbaustein an oder übernimm eine vorhandene Sicherungsdatei.';
+        titleEl.textContent = en ? 'No snippets yet' : 'Noch keine Bausteine vorhanden';
+        hintEl.textContent = en
+          ? 'Create your first text snippet or import an existing backup file.'
+          : 'Lege deinen ersten Satzbaustein an oder übernimm eine vorhandene Sicherungsdatei.';
 
         const btnCreateFirst = document.createElement('button');
         btnCreateFirst.type = 'button';
         btnCreateFirst.className = 'btn btn-primary btn-compact-action';
-        btnCreateFirst.textContent = '+ Baustein anlegen';
+        btnCreateFirst.textContent = en ? '+ Create snippet' : '+ Baustein anlegen';
         btnCreateFirst.addEventListener('click', () => openManager(null));
 
         const btnImportFirst = document.createElement('button');
         btnImportFirst.type = 'button';
         btnImportFirst.className = 'btn btn-secondary btn-compact-action';
-        btnImportFirst.textContent = 'Importieren…';
+        btnImportFirst.textContent = en ? 'Import…' : 'Importieren…';
         btnImportFirst.addEventListener('click', () => sendIPC('importDialog'));
 
         actionsEl.appendChild(btnCreateFirst);
         actionsEl.appendChild(btnImportFirst);
       } else if (rawQuery !== '') {
-        titleEl.textContent = 'Keine passenden Bausteine';
-        hintEl.textContent = `Für „${searchInput.value.trim()}“ wurden keine Treffer gefunden.`;
+        titleEl.textContent = en ? 'No matching snippets' : 'Keine passenden Bausteine';
+        hintEl.textContent = en
+          ? `No matches found for "${searchInput.value.trim()}".`
+          : `Für „${searchInput.value.trim()}“ wurden keine Treffer gefunden.`;
 
         const btnReset = document.createElement('button');
         btnReset.type = 'button';
         btnReset.className = 'btn btn-secondary btn-compact-action';
-        btnReset.textContent = 'Suche zurücksetzen';
+        btnReset.textContent = en ? 'Reset search' : 'Suche zurücksetzen';
         btnReset.addEventListener('click', () => {
           searchInput.value = '';
           state.activeCategory = '[ Alle ]';
@@ -1200,14 +1632,22 @@
         });
         actionsEl.appendChild(btnReset);
       } else if (state.activeCategory === '[ ⭐ Favoriten ]') {
-        titleEl.textContent = 'Noch keine Favoriten markiert';
-        hintEl.textContent = 'Klicke auf den Stern links neben einem Baustein, um ihn hier für den Schnellzugriff anzuheften.';
+        titleEl.textContent = en ? 'No favorites marked yet' : 'Noch keine Favoriten markiert';
+        hintEl.textContent = en
+          ? 'Click the star icon on any snippet to pin it here for quick access.'
+          : 'Klicke auf den Stern links neben einem Baustein, um ihn hier für den Schnellzugriff anzuheften.';
       } else if (state.activeCategory === '[ 🕒 Zuletzt ]') {
-        titleEl.textContent = 'Noch kein Verlauf';
-        hintEl.textContent = 'Zuletzt eingefügte Bausteine erscheinen automatisch in dieser Ansicht.';
+        titleEl.textContent = en ? 'No recent history yet' : 'Noch kein Verlauf';
+        hintEl.textContent = en
+          ? 'Recently pasted snippets will appear automatically in this view.'
+          : 'Zuletzt eingefügte Bausteine erscheinen automatisch in dieser Ansicht.';
       } else {
-        titleEl.textContent = 'Keine Bausteine in dieser Kategorie';
-        hintEl.textContent = 'Wähle eine andere Kategorie oder lege oben über „Neu“ einen Baustein an.';
+        titleEl.textContent = en
+          ? 'No snippets in this category'
+          : 'Keine Bausteine in dieser Kategorie';
+        hintEl.textContent = en
+          ? 'Choose another category or click "New" above to create a snippet.'
+          : 'Wähle eine andere Kategorie oder lege oben über „Neu“ einen Baustein an.';
       }
 
       wrap.appendChild(titleEl);
@@ -1242,7 +1682,13 @@
       // Favorite Star Button
       const starBtn = document.createElement('button');
       starBtn.className = 'card-fav-btn' + (item.favorite ? ' active' : '');
-      starBtn.title = item.favorite ? 'Aus Favoriten entfernen' : 'Zu Favoriten hinzufügen';
+      starBtn.title = item.favorite
+        ? en
+          ? 'Remove from favorites'
+          : 'Aus Favoriten entfernen'
+        : en
+          ? 'Add to favorites'
+          : 'Zu Favoriten hinzufügen';
       starBtn.innerHTML = item.favorite
         ? '<svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>'
         : '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>';
@@ -1274,8 +1720,12 @@
         kBadge.className = 'hotstring-tag' + (state.hotstringsEnabled ? '' : ' inactive');
         kBadge.textContent = state.hotstringsEnabled ? effTrigger : item.kuerzel;
         kBadge.title = state.hotstringsEnabled
-          ? `Tippe "${effTrigger}" zum automatischen Ersetzen`
-          : `Suchkürzel "${item.kuerzel}" (Auto-Ersetzen deaktiviert)`;
+          ? en
+            ? `Type "${effTrigger}" to expand automatically`
+            : `Tippe "${effTrigger}" zum automatischen Ersetzen`
+          : en
+            ? `Search keyword "${item.kuerzel}" (Auto-Type disabled)`
+            : `Suchkürzel "${item.kuerzel}" (Auto-Ersetzen deaktiviert)`;
         badgesDiv.appendChild(kBadge);
       }
 
@@ -1390,7 +1840,7 @@
     }
   }
 
-  // Snippet Action (delegates clipboard writing strictly to main process so {clipboard} & Win+V privacy stay intact)
+  // Snippet Action
   function handleSnippetAction(item) {
     const rawContent = item.content || '';
     const hasPlaceholders = /\{\?([^}]+)\}/.test(rawContent);
@@ -1402,8 +1852,16 @@
         title: item.title,
         text: rawContent,
       });
-      showToast('✓ Eingefügt');
+      showToast(isEn() ? '✓ Inserted' : '✓ Eingefügt');
     }
+  }
+
+  function handleSnippetCopyOnly(item) {
+    if (!item) return;
+    sendIPC('copyToClipboardOnly', {
+      title: item.title,
+      text: item.content || '',
+    });
   }
 
   // Template Prompt Modal with deduplication & default values
@@ -1449,6 +1907,7 @@
   }
 
   function openPromptModal(item) {
+    const en = isEn();
     state.currentPromptSnippet = item;
     promptTitle.textContent = item.title;
     promptFieldsContainer.innerHTML = '';
@@ -1475,7 +1934,7 @@
           inputElem.appendChild(o);
         });
       } else {
-        const isMultiline = /text|nachricht|inhalt|grund|multi/i.test(f.name);
+        const isMultiline = /text|nachricht|inhalt|grund|multi|message|body|notes|reason/i.test(f.name);
         if (isMultiline) {
           inputElem = document.createElement('textarea');
           inputElem.className = 'form-textarea';
@@ -1486,7 +1945,7 @@
           inputElem.className = 'form-input';
         }
         inputElem.value = f.defaultValue || '';
-        inputElem.placeholder = `${f.name} eingeben...`;
+        inputElem.placeholder = en ? `Enter ${f.name}...` : `${f.name} eingeben...`;
       }
 
       inputElem.dataset.varName = f.name;
@@ -1549,7 +2008,7 @@
       title: state.currentPromptSnippet.title,
       text,
     });
-    showToast('✓ Eingefügt');
+    showToast(isEn() ? '✓ Inserted' : '✓ Eingefügt');
     state.currentPromptSnippet = null;
   }
 
@@ -1565,11 +2024,16 @@
 
   // Context Menu (positioned relative to transformed .app-shell)
   function openContextMenu(clientX, clientY, item) {
+    const en = isEn();
     state.contextMenuSnippet = item;
     if (ctxFavoriteLabel) {
       ctxFavoriteLabel.textContent = item.favorite
-        ? 'Aus Favoriten entfernen'
-        : 'Als Favorit markieren';
+        ? en
+          ? 'Remove from favorites'
+          : 'Aus Favoriten entfernen'
+        : en
+          ? 'Mark as favorite'
+          : 'Als Favorit markieren';
     }
     const favSvg = ctxFavorite ? ctxFavorite.querySelector('svg') : null;
     if (favSvg) {
@@ -1599,7 +2063,7 @@
     state.contextMenuSnippet = null;
   }
 
-  // Safe Pointer-Down Tracking (prevents accidental modal/backdrop close on text-selection drag)
+  // Safe Pointer-Down Tracking
   let lastPointerDownTarget = null;
   window.addEventListener(
     'pointerdown',
@@ -1614,7 +2078,6 @@
       closeContextMenu();
     }
 
-    // Only treat as intentional backdrop/scrim click when pointerdown and click landed on the same overlay element
     if (e.target !== lastPointerDownTarget) return;
 
     // 1. Click outside .app-shell on the dimmed screen backdrop
@@ -1665,10 +2128,7 @@
 
   ctxCopy.addEventListener('click', () => {
     if (state.contextMenuSnippet) {
-      sendIPC('copyToClipboardOnly', {
-        title: state.contextMenuSnippet.title,
-        text: state.contextMenuSnippet.content,
-      });
+      handleSnippetCopyOnly(state.contextMenuSnippet);
     }
     closeContextMenu();
   });
@@ -1698,10 +2158,13 @@
     const target = state.contextMenuSnippet;
     closeContextMenu();
     if (!target) return;
+    const en = isEn();
     const confirmed = await showConfirmDialog({
-      title: 'Baustein löschen',
-      message: `Möchtest du den Baustein „${target.title}“ wirklich unwiderruflich löschen?`,
-      confirmText: 'Löschen',
+      title: en ? 'Delete snippet' : 'Baustein löschen',
+      message: en
+        ? `Are you sure you want to permanently delete "${target.title}"?`
+        : `Möchtest du den Baustein „${target.title}“ wirklich unwiderruflich löschen?`,
+      confirmText: en ? 'Delete' : 'Löschen',
       danger: true,
     });
     if (confirmed) {
@@ -1739,10 +2202,17 @@
 
   function syncEditFavoriteButtonUI() {
     if (!btnToggleEditFavorite) return;
+    const en = isEn();
     const fav = !!editFavorite.checked;
     btnToggleEditFavorite.classList.toggle('active', fav);
     if (editFavoriteLabel) {
-      editFavoriteLabel.textContent = fav ? 'Favorit aktiv' : 'Als Favorit';
+      editFavoriteLabel.textContent = fav
+        ? en
+          ? 'Favorite active'
+          : 'Favorit aktiv'
+        : en
+          ? 'Mark Favorite'
+          : 'Als Favorit';
     }
   }
 
@@ -1759,8 +2229,9 @@
 
   function openManager(snippet = null) {
     closeContextMenu();
+    const en = isEn();
     if (snippet) {
-      managerTitle.textContent = 'Baustein bearbeiten';
+      managerTitle.textContent = en ? 'Edit snippet' : 'Baustein bearbeiten';
       editOriginalTitle.value = snippet.title;
       editTitle.value = snippet.title;
       editKuerzel.value = snippet.kuerzel || '';
@@ -1770,7 +2241,7 @@
       btnDeleteSnippet.style.display = 'inline-flex';
       btnDuplicateFromManager.style.display = 'inline-flex';
     } else {
-      managerTitle.textContent = 'Neuen Baustein anlegen';
+      managerTitle.textContent = en ? 'Create new snippet' : 'Neuen Baustein anlegen';
       editOriginalTitle.value = '';
       editTitle.value = '';
       editKuerzel.value = '';
@@ -1800,10 +2271,13 @@
   btnDeleteSnippet.addEventListener('click', async () => {
     const title = editOriginalTitle.value;
     if (!title) return;
+    const en = isEn();
     const confirmed = await showConfirmDialog({
-      title: 'Baustein löschen',
-      message: `Möchtest du den Baustein „${title}“ wirklich unwiderruflich löschen?`,
-      confirmText: 'Löschen',
+      title: en ? 'Delete snippet' : 'Baustein löschen',
+      message: en
+        ? `Are you sure you want to permanently delete "${title}"?`
+        : `Möchtest du den Baustein „${title}“ wirklich unwiderruflich löschen?`,
+      confirmText: en ? 'Delete' : 'Löschen',
       danger: true,
     });
     if (confirmed) {
@@ -1819,12 +2293,15 @@
   });
 
   btnSaveSnippet.addEventListener('click', async () => {
+    const en = isEn();
     const cleanTitle = editTitle.value.replace(/[\r\n\[\]]/g, ' ').trim();
     if (!cleanTitle) {
       await showConfirmDialog({
-        title: 'Titel fehlt',
-        message: 'Bitte gib einen Titel für den Satzbaustein ein.',
-        confirmText: 'Verstanden',
+        title: en ? 'Missing title' : 'Titel fehlt',
+        message: en
+          ? 'Please enter a title for this snippet.'
+          : 'Bitte gib einen Titel für den Satzbaustein ein.',
+        confirmText: en ? 'Got it' : 'Verstanden',
         showCancel: false,
       });
       editTitle.focus();
@@ -1838,9 +2315,11 @@
 
     if (collision) {
       const overwrite = await showConfirmDialog({
-        title: 'Baustein überschreiben?',
-        message: `Ein Baustein mit dem Namen „${collision.title}“ existiert bereits. Möchtest du ihn überschreiben?`,
-        confirmText: 'Überschreiben',
+        title: en ? 'Overwrite snippet?' : 'Baustein überschreiben?',
+        message: en
+          ? `A snippet named "${collision.title}" already exists. Do you want to overwrite it?`
+          : `Ein Baustein mit dem Namen „${collision.title}“ existiert bereits. Möchtest du ihn überschreiben?`,
+        confirmText: en ? 'Overwrite' : 'Überschreiben',
         danger: true,
       });
       if (!overwrite) {
@@ -1890,6 +2369,7 @@
     updateHotstringUI();
     renderActiveHotkeys();
     updateSecurityButtonsUI();
+    renderUpdateUI();
     settingsModal.classList.add('active');
   }
 
@@ -1898,6 +2378,19 @@
       stopHotkeyRecording(true);
       settingsModal.classList.remove('active');
       searchInput.focus();
+    });
+  }
+
+  if (languageSegmented) {
+    languageSegmented.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-lang-val]');
+      if (!btn) return;
+      const nextLang = btn.dataset.langVal;
+      if (!nextLang || nextLang === state.language) return;
+      state.language = nextLang;
+      state.effectiveLanguage = nextLang === 'auto' ? detectBrowserLanguage() : nextLang;
+      applyLanguageUI();
+      sendIPC('setLanguage', { language: nextLang });
     });
   }
 
@@ -2060,10 +2553,11 @@
   }
 
   function renderUpdateUI() {
+    const en = isEn();
     const u = state.updateState;
     const ver = (u && u.currentVersion) || state.version;
     if (updateStatusHeadline) {
-      updateStatusHeadline.textContent = `SatzTresor v${ver}`;
+      updateStatusHeadline.textContent = `SnapPhrase v${ver}`;
     }
 
     if (!u) return;
@@ -2075,13 +2569,33 @@
       settingUpdateRepo.value = u.repoSlug || '';
     }
 
+    if (u.status === 'store-managed' || state.isWindowsStore) {
+      if (updateReadyPill) updateReadyPill.style.display = 'none';
+      if (updateProgressWrap) updateProgressWrap.style.display = 'none';
+      if (autoUpdateToggleRow) autoUpdateToggleRow.style.display = 'none';
+      if (btnUpdateAction) btnUpdateAction.style.display = 'none';
+      if (updateStatusDesc) {
+        updateStatusDesc.textContent = en
+          ? 'Updates are managed automatically via Microsoft Store'
+          : 'Updates erfolgen automatisch über den Microsoft Store';
+      }
+      return;
+    }
+
+    if (autoUpdateToggleRow) autoUpdateToggleRow.style.display = 'flex';
+    if (btnUpdateAction) btnUpdateAction.style.display = 'inline-flex';
+
     const isReadyToInstall = u.status === 'downloaded' || u.status === 'portable-available';
     if (updateReadyPill && updateReadyLabel) {
       if (isReadyToInstall && u.availableVersion) {
         updateReadyLabel.textContent =
           u.status === 'portable-available'
-            ? `Update v${u.availableVersion} laden`
-            : `Update v${u.availableVersion} – Neu starten`;
+            ? en
+              ? `Download v${u.availableVersion}`
+              : `Update v${u.availableVersion} laden`
+            : en
+              ? `Update v${u.availableVersion} – Restart`
+              : `Update v${u.availableVersion} – Neu starten`;
         updateReadyPill.style.display = 'inline-flex';
       } else {
         updateReadyPill.style.display = 'none';
@@ -2105,47 +2619,66 @@
 
     switch (u.status) {
       case 'unconfigured':
-        updateStatusDesc.textContent = 'GitHub-Quelle (name/satztresor) unten hinterlegen, um Updates zu aktivieren';
-        btnUpdateAction.textContent = 'Jetzt prüfen';
+        updateStatusDesc.textContent = en
+          ? 'Configure GitHub repository (owner/SnapPhrase) to enable updates'
+          : 'GitHub-Quelle (name/SnapPhrase) hinterlegen, um Updates zu aktivieren';
+        btnUpdateAction.textContent = en ? 'Check now' : 'Jetzt prüfen';
         break;
       case 'checking':
-        updateStatusDesc.textContent = 'Suche nach neuen Versionen auf GitHub…';
-        btnUpdateAction.textContent = 'Prüfe…';
+        updateStatusDesc.textContent = en
+          ? 'Checking GitHub for new releases…'
+          : 'Suche nach neuen Versionen auf GitHub…';
+        btnUpdateAction.textContent = en ? 'Checking…' : 'Prüfe…';
         btnUpdateAction.disabled = true;
         break;
       case 'available':
-        updateStatusDesc.textContent = `Neue Version v${u.availableVersion} verfügbar`;
-        btnUpdateAction.textContent = 'Herunterladen';
+        updateStatusDesc.textContent = en
+          ? `New version v${u.availableVersion} available`
+          : `Neue Version v${u.availableVersion} verfügbar`;
+        btnUpdateAction.textContent = en ? 'Download' : 'Herunterladen';
         btnUpdateAction.classList.add('ready');
         break;
       case 'downloading':
-        updateStatusDesc.textContent = `Update v${u.availableVersion || ''} wird im Hintergrund geladen (${u.percent || 0} %)…`;
-        btnUpdateAction.textContent = 'Lädt…';
+        updateStatusDesc.textContent = en
+          ? `Downloading update v${u.availableVersion || ''} in background (${u.percent || 0}%)…`
+          : `Update v${u.availableVersion || ''} wird im Hintergrund geladen (${u.percent || 0} %)…`;
+        btnUpdateAction.textContent = en ? 'Downloading…' : 'Lädt…';
         btnUpdateAction.disabled = true;
         break;
       case 'downloaded':
-        updateStatusDesc.textContent = `Version v${u.availableVersion} geladen — bereit zur sofortigen Installation`;
-        btnUpdateAction.textContent = 'Jetzt neu starten';
+        updateStatusDesc.textContent = en
+          ? `Version v${u.availableVersion} downloaded — ready to install`
+          : `Version v${u.availableVersion} geladen — bereit zur sofortigen Installation`;
+        btnUpdateAction.textContent = en ? 'Restart now' : 'Jetzt neu starten';
         btnUpdateAction.classList.add('ready');
         break;
       case 'portable-available':
-        updateStatusDesc.textContent = `Neue Version v${u.availableVersion} auf GitHub verfügbar`;
-        btnUpdateAction.textContent = 'Herunterladen';
+        updateStatusDesc.textContent = en
+          ? `New version v${u.availableVersion} available on GitHub`
+          : `Neue Version v${u.availableVersion} auf GitHub verfügbar`;
+        btnUpdateAction.textContent = en ? 'Download' : 'Herunterladen';
         btnUpdateAction.classList.add('ready');
         break;
       case 'up-to-date':
-        updateStatusDesc.textContent = `SatzTresor v${ver} ist auf dem neuesten Stand`;
-        btnUpdateAction.textContent = 'Jetzt prüfen';
+        updateStatusDesc.textContent = en
+          ? `SnapPhrase v${ver} is up to date`
+          : `SnapPhrase v${ver} ist auf dem neuesten Stand`;
+        btnUpdateAction.textContent = en ? 'Check now' : 'Jetzt prüfen';
         break;
       case 'error':
-        updateStatusDesc.textContent = u.errorMessage || 'Update-Prüfung fehlgeschlagen';
-        btnUpdateAction.textContent = 'Erneut prüfen';
+        updateStatusDesc.textContent =
+          u.errorMessage || (en ? 'Update check failed' : 'Update-Prüfung fehlgeschlagen');
+        btnUpdateAction.textContent = en ? 'Retry' : 'Erneut prüfen';
         break;
       default:
         updateStatusDesc.textContent = u.autoUpdateEnabled
-          ? `Automatische Hintergrund-Updates aktiv (${u.repoSlug})`
-          : 'Automatische Updates pausiert';
-        btnUpdateAction.textContent = 'Jetzt prüfen';
+          ? en
+            ? `Automatic background updates active (${u.repoSlug})`
+            : `Automatische Hintergrund-Updates aktiv (${u.repoSlug})`
+          : en
+            ? 'Automatic updates paused'
+            : 'Automatische Updates pausiert';
+        btnUpdateAction.textContent = en ? 'Check now' : 'Jetzt prüfen';
         break;
     }
   }
@@ -2199,7 +2732,7 @@
   function submitUnlock() {
     const pw = unlockPassword.value;
     if (!pw) {
-      unlockError.textContent = 'Bitte Passwort eingeben!';
+      unlockError.textContent = isEn() ? 'Please enter your password!' : 'Bitte Passwort eingeben!';
       unlockPassword.focus();
       return;
     }
@@ -2215,6 +2748,7 @@
 
   // Crypto Modal (Encrypt / Change Password / Remove Encryption)
   function renderCryptoModalMode(mode) {
+    const en = isEn();
     state.cryptoMode = mode;
     cryptoError.textContent = '';
 
@@ -2226,23 +2760,27 @@
     if (tabRemoveCrypto) tabRemoveCrypto.classList.toggle('active', mode === 'remove');
 
     if (mode === 'encrypt') {
-      cryptoModalTitle.textContent = 'Datenbank verschlüsseln';
-      cryptoStatusDesc.textContent =
-        'Schütze deine Satzbausteine mit starker AES-256-CBC PBKDF2 Verschlüsselung:';
+      cryptoModalTitle.textContent = en ? 'Encrypt Database' : 'Datenbank verschlüsseln';
+      cryptoStatusDesc.textContent = en
+        ? 'Protect your snippets with strong AES-256-CBC PBKDF2 encryption:'
+        : 'Schütze deine Satzbausteine mit starker AES-256-CBC PBKDF2 Verschlüsselung:';
       cryptoNewPw.value = '';
       cryptoConfirmPw.value = '';
       setTimeout(() => cryptoNewPw.focus(), 40);
     } else if (mode === 'change') {
-      cryptoModalTitle.textContent = 'Verschlüsselung verwalten';
-      cryptoStatusDesc.textContent = 'Ändere dein Master-Passwort ohne Entschlüsselung auf der Festplatte:';
+      cryptoModalTitle.textContent = en ? 'Manage Encryption' : 'Verschlüsselung verwalten';
+      cryptoStatusDesc.textContent = en
+        ? 'Change your master password without writing unencrypted data to disk:'
+        : 'Ändere dein Master-Passwort ohne Entschlüsselung auf der Festplatte:';
       cryptoOldPw.value = '';
       cryptoChangeNewPw.value = '';
       cryptoChangeConfirmPw.value = '';
       setTimeout(() => cryptoOldPw.focus(), 40);
     } else {
-      cryptoModalTitle.textContent = 'Verschlüsselung aufheben';
-      cryptoStatusDesc.textContent =
-        'Gib dein aktuelles Master-Passwort ein, um den Passwortschutz dauerhaft zu entfernen:';
+      cryptoModalTitle.textContent = en ? 'Remove Encryption' : 'Verschlüsselung aufheben';
+      cryptoStatusDesc.textContent = en
+        ? 'Enter your current master password to permanently remove password protection:'
+        : 'Gib dein aktuelles Master-Passwort ein, um den Passwortschutz dauerhaft zu entfernen:';
       cryptoCurrentPw.value = '';
       setTimeout(() => cryptoCurrentPw.focus(), 40);
     }
@@ -2267,18 +2805,19 @@
   }
 
   function submitCrypto() {
+    const en = isEn();
     cryptoError.textContent = '';
 
     if (state.cryptoMode === 'encrypt') {
       const p1 = cryptoNewPw.value;
       const p2 = cryptoConfirmPw.value;
       if (!p1) {
-        cryptoError.textContent = 'Passwort darf nicht leer sein!';
+        cryptoError.textContent = en ? 'Password cannot be empty!' : 'Passwort darf nicht leer sein!';
         cryptoNewPw.focus();
         return;
       }
       if (p1 !== p2) {
-        cryptoError.textContent = 'Passwörter stimmen nicht überein!';
+        cryptoError.textContent = en ? 'Passwords do not match!' : 'Passwörter stimmen nicht überein!';
         cryptoConfirmPw.focus();
         return;
       }
@@ -2288,17 +2827,23 @@
       const newPw = cryptoChangeNewPw.value;
       const confirmPw = cryptoChangeConfirmPw.value;
       if (!oldPw) {
-        cryptoError.textContent = 'Bitte aktuelles Passwort eingeben!';
+        cryptoError.textContent = en
+          ? 'Please enter your current password!'
+          : 'Bitte aktuelles Passwort eingeben!';
         cryptoOldPw.focus();
         return;
       }
       if (!newPw) {
-        cryptoError.textContent = 'Neues Passwort darf nicht leer sein!';
+        cryptoError.textContent = en
+          ? 'New password cannot be empty!'
+          : 'Neues Passwort darf nicht leer sein!';
         cryptoChangeNewPw.focus();
         return;
       }
       if (newPw !== confirmPw) {
-        cryptoError.textContent = 'Neue Passwörter stimmen nicht überein!';
+        cryptoError.textContent = en
+          ? 'New passwords do not match!'
+          : 'Neue Passwörter stimmen nicht überein!';
         cryptoChangeConfirmPw.focus();
         return;
       }
@@ -2306,7 +2851,7 @@
     } else {
       const pw = cryptoCurrentPw.value;
       if (!pw) {
-        cryptoError.textContent = 'Bitte Passwort eingeben!';
+        cryptoError.textContent = en ? 'Please enter your password!' : 'Bitte Passwort eingeben!';
         cryptoCurrentPw.focus();
         return;
       }
@@ -2349,7 +2894,7 @@
       }
       if (parsed.status === 'cancel') {
         stopHotkeyRecording(true);
-        showToast('Aufnahme abgebrochen');
+        showToast(isEn() ? 'Recording cancelled' : 'Aufnahme abgebrochen');
         return;
       }
       if (parsed.status === 'needs_modifier') {
@@ -2436,6 +2981,13 @@
       return;
     }
 
+    // Ctrl+P: Toggle Pin window on top
+    if (e.key.toLowerCase() === 'p' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      sendIPC('togglePin');
+      return;
+    }
+
     // Ctrl+N: Create new snippet
     if (e.key.toLowerCase() === 'n' && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
@@ -2451,6 +3003,18 @@
         sendIPC('duplicateSnippet', { title: sel.title });
       }
       return;
+    }
+
+    // Ctrl+C (when no text is selected in search input): Copy selected snippet to clipboard
+    if (e.key.toLowerCase() === 'c' && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
+      const hasSearchSelection =
+        document.activeElement === searchInput &&
+        searchInput.selectionStart !== searchInput.selectionEnd;
+      if (!hasSearchSelection && state.filteredSnippets.length > 0) {
+        e.preventDefault();
+        handleSnippetCopyOnly(state.filteredSnippets[state.selectedIndex]);
+        return;
+      }
     }
 
     // Alt+F or Ctrl+F (when list focused): Toggle favorite for selected
@@ -2494,6 +3058,11 @@
         const wrapped = state.selectedIndex > prev;
         updateCardSelection(!e.repeat && !wrapped);
       }
+    } else if (e.key === 'Enter' && e.shiftKey) {
+      e.preventDefault();
+      if (state.filteredSnippets.length > 0) {
+        handleSnippetCopyOnly(state.filteredSnippets[state.selectedIndex]);
+      }
     } else if (e.key === 'Enter') {
       e.preventDefault();
       if (state.filteredSnippets.length > 0) {
@@ -2529,12 +3098,13 @@
         state.theme = initialTheme;
         applyTheme(initialTheme);
       }
+      const initialLang = params.get('lang');
+      if (initialLang === 'de' || initialLang === 'en') {
+        state.effectiveLanguage = initialLang;
+      }
     } catch (e) {}
     syncBodyClasses();
-    updateLayoutUI();
-    updatePinUI();
-    renderCategories();
-    filterAndRender();
+    applyLanguageUI();
     sendIPC('ready');
   }
 
