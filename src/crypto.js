@@ -1,5 +1,5 @@
 /**
- * SnapPhrase v1.6.0 — Cryptography Engine
+ * SnapPhrase v1.7.0 — Cryptography Engine
  * AES-256-CBC + PBKDF2-SHA256 (100,000 rounds) + HMAC-SHA256 + Base64
  * 100% byte-compatible with bausteine.ini formats (SPENC2:, STENC2:, QTENC2:, TSENC2:, QTENC:, TSENC:)
  */

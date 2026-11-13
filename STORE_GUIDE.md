@@ -11,8 +11,8 @@ Du hast zwei sich perfekt ergänzende Wege, um **SnapPhrase** kostenlos, interna
    npm run build:exe
    ```
 2. Im Ordner `dist/` entstehen zwei fertige Dateien (komplett **ohne** deine persönlichen Satzbausteine — jeder Nutzer startet frisch mit 3 Beispielen in seiner Systemsprache):
-   * **`SnapPhrase-Setup-1.6.0.exe`** — Klassischer Windows-Installer (legt Startmenü- & Desktop-Verknüpfung an, benötigt keine Admin-Rechte).
-   * **`SnapPhrase-Portable-1.6.0.exe`** — Einzeldatei zum direkten Starten ohne Installation (ideal für gesperrte Büro-PCs ohne Microsoft Store oder für USB-Sticks; legt man daneben einen Ordner `SnapPhrase-Daten` an, speichert die Portable-Version ihre Daten direkt dort).
+   * **`SnapPhrase-Setup-1.7.0.exe`** — Klassischer Windows-Installer (legt Startmenü- & Desktop-Verknüpfung an, benötigt keine Admin-Rechte).
+   * **`SnapPhrase-Portable-1.7.0.exe`** — Einzeldatei zum direkten Starten ohne Installation (ideal für gesperrte Büro-PCs ohne Microsoft Store oder für USB-Sticks; legt man daneben einen Ordner `SnapPhrase-Daten` an, speichert die Portable-Version ihre Daten direkt dort).
 3. **Veröffentlichung auf GitHub Releases (`100xla/SnapPhrase`):**
    ```bash
    npm run publish:github
@@ -47,11 +47,11 @@ Trage deine drei Werte im Abschnitt `"build" -> "appx"` der [`package.json`](./p
 npm run build:store
 ```
 
-`electron-builder` erstellt im Ordner `dist/` die fertige Datei `SnapPhrase-Store-1.6.0.appx` (inklusive der vorbereiteten Store-Kachel-Icons aus `build/appx/`).
+`electron-builder` erstellt im Ordner `dist/` die fertige Datei `SnapPhrase-Store-1.7.0.appx` (inklusive der vorbereiteten Store-Kachel-Icons aus `build/appx/`).
 
 ### 4. Paket im Partner Center hochladen & ausfüllen
 
-1. **Packages:** Ziehe `dist/SnapPhrase-Store-1.6.0.appx` per Drag & Drop in das Feld *Packages*.
+1. **Packages:** Ziehe `dist/SnapPhrase-Store-1.7.0.appx` per Drag & Drop in das Feld *Packages*.
 2. **Properties:**
    * Category: **Productivity** (*Produktivität*)
    * Privacy Policy URL: `https://raw.githubusercontent.com/100xla/SnapPhrase/main/PRIVACY.md`

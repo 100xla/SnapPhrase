@@ -1,5 +1,5 @@
 /**
- * SnapPhrase v1.6.0 — Storage & INI Database Engine
+ * SnapPhrase v1.7.0 — Storage & INI Database Engine
  * Handles atomic file operations, smart hash-verified rolling backups, INI serialization,
  * AES-256-CBC database encryption (lock & password change), JSON/CSV/INI import/export,
  * debounced usage persistence, and application settings.
@@ -30,6 +30,7 @@ const UI_SETTING_KEYS = [
   'DoubleTapCtrlEnabled',
   'HotstringsEnabled',
   'HotstringPrefix',
+  'ExcludedApps',
   'RestoreClipboard',
   'ActiveHotkeys',
   'AutoUpdateEnabled',
@@ -48,6 +49,9 @@ const PERSISTED_UI_PREF_KEYS = [
   'CenterCompact',
   'SidebarWidth',
   'DoubleTapCtrlEnabled',
+  'HotstringsEnabled',
+  'HotstringPrefix',
+  'ExcludedApps',
   'ActiveHotkeys',
   'AutoUpdateEnabled',
   'UpdateRepo',
@@ -83,7 +87,7 @@ function repairLegacyLeakedMetadata(rawContent, sectionMap = null) {
   const cleanLines = [];
   const metadataKeys = [
     'usagecount', 'aufrufe', 'workspace', 'arbeitsbereich', 'kategorie',
-    'lastused', 'zuletzt', 'favorit', 'kuerzel', 'hotstring', 'shortcut',
+    'lastused', 'zuletzt', 'favorit', 'kuerzel', 'hotstring', 'shortcut', 'format',
   ];
 
   for (const line of lines) {
@@ -101,10 +105,57 @@ function repairLegacyLeakedMetadata(rawContent, sectionMap = null) {
   return cleanLines.join('\n');
 }
 
+function parseBackupSortParts(fileName) {
+  const m = String(fileName || '').match(/^bausteine_(\d{8})_(\d{6})(?:_(\d+))?(?:_(\d+))?\.bak$/);
+  if (!m) return [0, 0, 0, 0];
+  return [
+    parseInt(m[1], 10) || 0,
+    parseInt(m[2], 10) || 0,
+    parseInt(m[3] || '0', 10) || 0,
+    parseInt(m[4] || '0', 10) || 0,
+  ];
+}
+
+function compareBackupNames(a, b) {
+  const pa = parseBackupSortParts(a);
+  const pb = parseBackupSortParts(b);
+  for (let i = 0; i < 4; i++) {
+    if (pa[i] !== pb[i]) return pa[i] - pb[i];
+  }
+  return String(a).localeCompare(String(b));
+}
+
+function parseBackupTimestampMs(fileName, fallbackMs = Date.now()) {
+  const m = String(fileName || '').match(/^bausteine_(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})/);
+  if (!m) return fallbackMs;
+  const d = new Date(
+    parseInt(m[1], 10),
+    parseInt(m[2], 10) - 1,
+    parseInt(m[3], 10),
+    parseInt(m[4], 10),
+    parseInt(m[5], 10),
+    parseInt(m[6], 10)
+  );
+  const t = d.getTime();
+  return Number.isNaN(t) ? fallbackMs : t;
+}
+
 class Storage {
+  static normalizeAppName(raw) {
+    let s = String(raw || '').trim().replace(/^["']+|["']+$/g, '').trim();
+    if (!s) return '';
+    s = path.win32.basename(s).toLowerCase().trim();
+    s = s.replace(/\.exe$/i, '').replace(/^\.+|\.+$/g, '').trim();
+    if (!s || /[<>:"/\\|?*\x00-\x1f\s]/.test(s)) {
+      return '';
+    }
+    return `${s}.exe`;
+  }
+
   constructor(filePath, options = {}) {
     this.filePath = filePath;
     this.systemLocale = String(options.systemLocale || '');
+    this.inMemoryOnly = Boolean(options.inMemoryOnly);
     this.backupDir = path.join(path.dirname(filePath), 'backups');
     this.uiPrefsPath = path.join(path.dirname(filePath), 'snapphrase-ui.json');
     this.legacyUiPrefsPath = path.join(path.dirname(filePath), 'satztresor-ui.json');
@@ -116,10 +167,12 @@ class Storage {
     this.masterPassword = '';
     this.isLocked = false;
     this._saveTimer = null;
+    this._lastRollingBackupAt = 0;
     this._enforceStartupCenterPending = true;
   }
 
   _loadPersistedUiPrefs() {
+    if (this.inMemoryOnly) return;
     try {
       const targetPath = fs.existsSync(this.uiPrefsPath)
         ? this.uiPrefsPath
@@ -138,6 +191,7 @@ class Storage {
   }
 
   _writePersistedUiPrefs() {
+    if (this.inMemoryOnly) return;
     try {
       const out = {};
       for (const key of PERSISTED_UI_PREF_KEYS) {
@@ -322,6 +376,7 @@ class Storage {
     settings.set('DoubleTapCtrlEnabled', '1');
     settings.set('HotstringsEnabled', '1');
     settings.set('HotstringPrefix', ';;');
+    settings.set('ExcludedApps', '');
     settings.set('RestoreClipboard', '1');
     settings.set('ActiveHotkeys', 'Control+Space');
     settings.set('AutoUpdateEnabled', '1');
@@ -356,12 +411,61 @@ class Storage {
     return null;
   }
 
+  _isEncryptedIniHeader(raw) {
+    if (!raw || typeof raw !== 'string') return false;
+    return (
+      raw.startsWith('SPENC2:') ||
+      raw.startsWith('STENC2:') ||
+      raw.startsWith('QTENC2:') ||
+      raw.startsWith('TSENC2:') ||
+      raw.startsWith('SPENC:') ||
+      raw.startsWith('STENC:') ||
+      raw.startsWith('QTENC:') ||
+      raw.startsWith('TSENC:')
+    );
+  }
+
+  _decryptIniPayload(raw, password) {
+    if (!this._isEncryptedIniHeader(raw)) {
+      return { success: true, ini: raw, encrypted: false };
+    }
+    if (!password) {
+      return { success: false, encrypted: true, reason: 'no_password' };
+    }
+    const isV2 =
+      raw.startsWith('SPENC2:') ||
+      raw.startsWith('STENC2:') ||
+      raw.startsWith('QTENC2:') ||
+      raw.startsWith('TSENC2:');
+    const encVer = isV2 ? 2 : 1;
+    const cipher = raw.substring(isV2 ? 7 : 6).trim();
+    try {
+      const decrypted = AES256.decrypt(cipher, password, encVer);
+      const isLongKey =
+        decrypted.startsWith('SnapPhraseVerifiedMasterKey:') ||
+        decrypted.startsWith('SatzTresorVerifiedMasterKey:');
+      const isShortKey =
+        decrypted.startsWith('QuickTabVerifiedMasterKey:') ||
+        decrypted.startsWith('TabsmartVerifiedMasterKey:');
+      if (!isLongKey && !isShortKey) {
+        return { success: false, encrypted: true, reason: 'wrong_password' };
+      }
+      return {
+        success: true,
+        encrypted: true,
+        ini: decrypted.substring(isLongKey ? 28 : 26),
+      };
+    } catch (e) {
+      return { success: false, encrypted: true, reason: 'wrong_password' };
+    }
+  }
+
   createRollingBackup() {
     try {
-      if (!fs.existsSync(this.filePath)) return;
+      if (this.inMemoryOnly || !fs.existsSync(this.filePath)) return null;
 
       const currentRaw = fs.readFileSync(this.filePath);
-      if (currentRaw.length === 0) return;
+      if (currentRaw.length === 0) return null;
       const currentHash = hashBufferOrString(currentRaw);
 
       if (!fs.existsSync(this.backupDir)) {
@@ -369,8 +473,8 @@ class Storage {
       }
 
       const existingBackups = fs.readdirSync(this.backupDir)
-        .filter((f) => f.startsWith('bausteine_') && f.endsWith('.bak'))
-        .sort();
+        .filter((f) => /^bausteine_[0-9_]+\.bak$/.test(f))
+        .sort(compareBackupNames);
 
       // Skip backup if content is identical to latest rolling backup
       if (existingBackups.length > 0) {
@@ -378,7 +482,7 @@ class Storage {
         try {
           const latestRaw = fs.readFileSync(latestPath);
           if (hashBufferOrString(latestRaw) === currentHash) {
-            return;
+            return null;
           }
         } catch (e) {}
       }
@@ -386,13 +490,25 @@ class Storage {
       // 1. Direct .bak copy
       fs.copyFileSync(this.filePath, this.filePath + '.bak');
 
-      // 2. Timestamped backup in backups/
+      // 2. Timestamped backup in backups/ (handle same-second collisions safely)
       const now = new Date();
       const pad = (n) => String(n).padStart(2, '0');
       const timestamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
-      const bakName = `bausteine_${timestamp}.bak`;
+      let bakName = `bausteine_${timestamp}.bak`;
+      if (fs.existsSync(path.join(this.backupDir, bakName))) {
+        const ms = String(now.getMilliseconds()).padStart(3, '0');
+        bakName = `bausteine_${timestamp}_${ms}.bak`;
+        let suffix = 2;
+        while (fs.existsSync(path.join(this.backupDir, bakName))) {
+          bakName = `bausteine_${timestamp}_${ms}_${suffix}.bak`;
+          suffix++;
+        }
+      }
+
       fs.copyFileSync(this.filePath, path.join(this.backupDir, bakName));
+      this._lastRollingBackupAt = Date.now();
       existingBackups.push(bakName);
+      existingBackups.sort(compareBackupNames);
 
       // 3. Keep maximum 5 rolling backups
       while (existingBackups.length > 5) {
@@ -401,8 +517,153 @@ class Storage {
           fs.unlinkSync(path.join(this.backupDir, oldest));
         } catch (e) {}
       }
+      return bakName;
     } catch (err) {
       console.error('[Storage] Backup error:', err);
+      return null;
+    }
+  }
+
+  maybeCreateRollingBackup({ minIntervalMs = 0 } = {}) {
+    if (this.inMemoryOnly || this.isLocked || !fs.existsSync(this.filePath)) {
+      return null;
+    }
+    if (minIntervalMs > 0 && this._lastRollingBackupAt > 0) {
+      const elapsed = Date.now() - this._lastRollingBackupAt;
+      if (elapsed < minIntervalMs) {
+        return null;
+      }
+    }
+    return this.createRollingBackup();
+  }
+
+  _countSnippetsInIni(iniText) {
+    if (!iniText || typeof iniText !== 'string') return 0;
+    let count = 0;
+    const lines = iniText.split(/\r?\n/);
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+        const sec = trimmed.slice(1, -1).trim();
+        if (sec && !this.isReservedSection(sec)) {
+          count++;
+        }
+      }
+    }
+    return count;
+  }
+
+  listRollingBackups() {
+    try {
+      if (!fs.existsSync(this.backupDir)) return [];
+      const files = fs.readdirSync(this.backupDir)
+        .filter((f) => /^bausteine_[0-9_]+\.bak$/.test(f))
+        .sort(compareBackupNames)
+        .reverse()
+        .slice(0, 5);
+
+      return files.map((fileName) => {
+        const fullPath = path.join(this.backupDir, fileName);
+        const stat = fs.statSync(fullPath);
+        const raw = fs.readFileSync(fullPath, 'utf8');
+        const encrypted = this._isEncryptedIniHeader(raw);
+        let snippetCount = null;
+        if (!encrypted) {
+          snippetCount = this._countSnippetsInIni(raw);
+        } else if (!this.isLocked && this.masterPassword) {
+          const dec = this._decryptIniPayload(raw, this.masterPassword);
+          if (dec.success) {
+            snippetCount = this._countSnippetsInIni(dec.ini);
+          }
+        }
+        return {
+          fileName,
+          createdAtMs: parseBackupTimestampMs(fileName, stat.mtimeMs),
+          sizeBytes: stat.size,
+          encrypted,
+          snippetCount,
+        };
+      });
+    } catch (err) {
+      console.error('[Storage] listRollingBackups error:', err);
+      return [];
+    }
+  }
+
+  restoreRollingBackup(fileName) {
+    const isEn = this.getEffectiveLanguage() === 'en';
+    if (this.isLocked) {
+      return {
+        success: false,
+        error: isEn ? 'Please unlock SnapPhrase first.' : 'Bitte entsperre SnapPhrase zuerst.',
+      };
+    }
+
+    const safeName = String(fileName || '').trim();
+    if (!/^bausteine_[0-9_]+\.bak$/.test(safeName)) {
+      return {
+        success: false,
+        error: isEn ? 'Invalid backup file name.' : 'Ungültiger Sicherungsdateiname.',
+      };
+    }
+
+    const targetPath = path.join(this.backupDir, safeName);
+    if (!fs.existsSync(targetPath)) {
+      return {
+        success: false,
+        error: isEn ? 'Backup file was not found.' : 'Sicherungsdatei wurde nicht gefunden.',
+      };
+    }
+
+    try {
+      const raw = fs.readFileSync(targetPath, 'utf8');
+      const dec = this._decryptIniPayload(raw, this.masterPassword);
+      if (!dec.success) {
+        if (dec.reason === 'no_password') {
+          return {
+            success: false,
+            error: isEn
+              ? 'This backup is encrypted with a master password.'
+              : 'Diese Sicherung ist mit einem Master-Passwort verschlüsselt.',
+          };
+        }
+        return {
+          success: false,
+          error: isEn
+            ? 'Backup uses a different master password and could not be decrypted.'
+            : 'Diese Sicherung wurde mit einem anderen Master-Passwort verschlüsselt.',
+        };
+      }
+
+      const tempStorage = new Storage(targetPath, {
+        inMemoryOnly: true,
+        systemLocale: this.systemLocale,
+      });
+      tempStorage.parseIni(dec.ini);
+
+      // Snapshot current state before restoring so even a restore can be undone
+      this.createRollingBackup();
+
+      const currentSettings = this.data.has(SETTINGS_SECTION)
+        ? new Map(this.data.get(SETTINGS_SECTION))
+        : null;
+
+      this.data.clear();
+      if (currentSettings) {
+        this.data.set(SETTINGS_SECTION, currentSettings);
+      }
+
+      let restoredCount = 0;
+      for (const [sec, keys] of tempStorage.data.entries()) {
+        if (!sec || this.isReservedSection(sec)) continue;
+        this.data.set(sec, new Map(keys));
+        restoredCount++;
+      }
+
+      this.save();
+      return { success: true, count: restoredCount };
+    } catch (err) {
+      return { success: false, error: err.message };
     }
   }
 
@@ -587,7 +848,7 @@ class Storage {
   }
 
   save() {
-    if (this.isLocked) return;
+    if (this.isLocked || this.inMemoryOnly) return;
     if (this._saveTimer) {
       clearTimeout(this._saveTimer);
       this._saveTimer = null;
@@ -660,6 +921,7 @@ class Storage {
       const usageCount = parseInt(keys.get('Aufrufe') || keys.get('UsageCount') || '0', 10);
       const lastUsed = keys.get('Zuletzt') || keys.get('LastUsed') || '';
       const favorite = keys.get('Favorit') === '1';
+      const richText = (keys.get('Format') || '').trim().toLowerCase() === 'markdown';
 
       list.push({
         title: section,
@@ -669,6 +931,7 @@ class Storage {
         usageCount: isNaN(usageCount) ? 0 : usageCount,
         lastUsed,
         favorite,
+        richText,
       });
     }
     return list;
@@ -690,24 +953,29 @@ class Storage {
     return categories;
   }
 
-  saveSnippet({ oldTitle, title, kuerzel = '', category = '', content = '', favorite = undefined }) {
+  saveSnippet({ oldTitle, title, kuerzel = '', category = '', content = '', favorite = undefined, richText = undefined }) {
     if (this.isLocked) return false;
     const cleanTitle = String(title || '').replace(/[\r\n\[\]]/g, ' ').trim();
     if (!cleanTitle || this.isReservedSection(cleanTitle)) return false;
 
+    this.maybeCreateRollingBackup({ minIntervalMs: 10 * 60 * 1000 });
+
     let existingFav = favorite !== undefined ? (favorite ? '1' : '0') : '0';
+    let existingRich = richText !== undefined ? Boolean(richText) : false;
     let existingAufrufe = '0';
     let existingZuletzt = '';
 
     if (oldTitle && oldTitle !== cleanTitle && this.data.has(oldTitle)) {
       const oldMap = this.data.get(oldTitle);
       if (favorite === undefined) existingFav = oldMap.get('Favorit') || '0';
+      if (richText === undefined) existingRich = (oldMap.get('Format') || '').trim().toLowerCase() === 'markdown';
       existingAufrufe = oldMap.get('Aufrufe') || oldMap.get('UsageCount') || '0';
       existingZuletzt = oldMap.get('Zuletzt') || oldMap.get('LastUsed') || '';
       this.data.delete(oldTitle);
     } else if (this.data.has(cleanTitle)) {
       const currentMap = this.data.get(cleanTitle);
       if (favorite === undefined) existingFav = currentMap.get('Favorit') || '0';
+      if (richText === undefined) existingRich = (currentMap.get('Format') || '').trim().toLowerCase() === 'markdown';
       existingAufrufe = currentMap.get('Aufrufe') || currentMap.get('UsageCount') || '0';
       existingZuletzt = currentMap.get('Zuletzt') || currentMap.get('LastUsed') || '';
     }
@@ -719,6 +987,9 @@ class Storage {
     map.set('Aufrufe', existingAufrufe);
     map.set('Zuletzt', existingZuletzt);
     map.set('Favorit', existingFav);
+    if (existingRich) {
+      map.set('Format', 'markdown');
+    }
 
     this.data.set(cleanTitle, map);
     this.save();
@@ -729,6 +1000,7 @@ class Storage {
     if (this.isLocked) return false;
     const cleanTitle = (title || '').trim();
     if (cleanTitle && this.data.has(cleanTitle)) {
+      this.maybeCreateRollingBackup({ minIntervalMs: 3 * 60 * 1000 });
       this.data.delete(cleanTitle);
       this.save();
       return true;
@@ -771,6 +1043,10 @@ class Storage {
     copyMap.set('Aufrufe', '0');
     copyMap.set('Zuletzt', '');
     copyMap.set('Favorit', source.get('Favorit') || '0');
+    const sourceFormat = source.get('Format');
+    if (sourceFormat) {
+      copyMap.set('Format', sourceFormat);
+    }
 
     this.data.set(newTitle, copyMap);
     this.save();
@@ -992,6 +1268,36 @@ class Storage {
     this.setSetting('HotstringPrefix', clean);
   }
 
+  getExcludedApps() {
+    const raw = this.getSetting('ExcludedApps', '');
+    if (!raw || !raw.trim()) return [];
+    const seen = new Set();
+    const out = [];
+    for (const part of raw.split(',')) {
+      const norm = Storage.normalizeAppName(part);
+      if (norm && !seen.has(norm)) {
+        seen.add(norm);
+        out.push(norm);
+      }
+    }
+    return out;
+  }
+
+  setExcludedApps(appsArray) {
+    const list = Array.isArray(appsArray) ? appsArray : String(appsArray || '').split(',');
+    const seen = new Set();
+    const normalized = [];
+    for (const entry of list) {
+      const norm = Storage.normalizeAppName(entry);
+      if (norm && !seen.has(norm)) {
+        seen.add(norm);
+        normalized.push(norm);
+      }
+    }
+    this.setSetting('ExcludedApps', normalized.join(','));
+    return normalized;
+  }
+
   getRestoreClipboard() {
     return this.getSetting('RestoreClipboard', '1') === '1';
   }
@@ -1137,9 +1443,9 @@ class Storage {
     try {
       const list = this.getSnippets();
       const escapeCsv = (str) => `"${String(str || '').replace(/"/g, '""')}"`;
-      let csv = 'Titel,Kuerzel,Kategorie,Inhalt,Favorit,Aufrufe\r\n';
+      let csv = 'Titel,Kuerzel,Kategorie,Inhalt,Favorit,Aufrufe,Format\r\n';
       for (const item of list) {
-        csv += `${escapeCsv(item.title)},${escapeCsv(item.kuerzel)},${escapeCsv(item.category)},${escapeCsv(item.content)},${item.favorite ? '1' : '0'},${item.usageCount || 0}\r\n`;
+        csv += `${escapeCsv(item.title)},${escapeCsv(item.kuerzel)},${escapeCsv(item.category)},${escapeCsv(item.content)},${item.favorite ? '1' : '0'},${item.usageCount || 0},${escapeCsv(item.richText ? 'markdown' : '')}\r\n`;
       }
       fs.writeFileSync(targetPath, '\uFEFF' + csv, 'utf8');
       return true;
@@ -1183,8 +1489,13 @@ class Storage {
             : 'Diese Datei ist mit einem Master-Passwort verschlüsselt. Bitte exportiere die Bausteine zuerst im entsperrten SnapPhrase über „Exportieren“.'
         );
       }
-      const tempStorage = new Storage(sourcePath);
+      const tempStorage = new Storage(sourcePath, {
+        inMemoryOnly: true,
+        systemLocale: this.systemLocale,
+      });
       tempStorage.parseIni(raw);
+
+      this.maybeCreateRollingBackup({ minIntervalMs: 0 });
 
       let count = 0;
       for (const [sec, keys] of tempStorage.data.entries()) {
@@ -1212,6 +1523,8 @@ class Storage {
           : null;
       if (!items) throw new Error('Ungültiges Dateiformat: Keine Satzbausteine in der JSON-Datei gefunden.');
 
+      this.maybeCreateRollingBackup({ minIntervalMs: 0 });
+
       let count = 0;
       for (const item of items) {
         const title = String(item.title || '').replace(/[\r\n\[\]]/g, ' ').trim();
@@ -1224,6 +1537,9 @@ class Storage {
         map.set('Aufrufe', String(item.usageCount || 0));
         map.set('Zuletzt', String(item.lastUsed || ''));
         map.set('Favorit', item.favorite ? '1' : '0');
+        if (item.richText === true || String(item.format || '').trim().toLowerCase() === 'markdown') {
+          map.set('Format', 'markdown');
+        }
 
         this.data.set(title, map);
         count++;
@@ -1285,6 +1601,8 @@ class Storage {
 
       if (rows.length < 2) throw new Error('CSV-Datei enthält keine Datenzeilen');
 
+      this.maybeCreateRollingBackup({ minIntervalMs: 0 });
+
       let count = 0;
       for (let i = 1; i < rows.length; i++) {
         const row = rows[i];
@@ -1296,6 +1614,8 @@ class Storage {
         const category = String(row[2] || '').trim();
         const content = String(row[3] || '');
         const favorite = String(row[4] || '').trim() === '1';
+        const fmtVal = String(row[6] || '').trim().toLowerCase();
+        const isRich = fmtVal === 'markdown' || fmtVal === '1' || fmtVal === 'true';
 
         const map = new Map();
         map.set('Inhalt', content);
@@ -1304,6 +1624,9 @@ class Storage {
         map.set('Aufrufe', '0');
         map.set('Zuletzt', '');
         map.set('Favorit', favorite ? '1' : '0');
+        if (isRich) {
+          map.set('Format', 'markdown');
+        }
 
         this.data.set(title, map);
         count++;

@@ -1,7 +1,7 @@
 {
   "name": "snapphrase",
-  "version": "1.6.0",
-  "description": "SnapPhrase v1.6.0 — Fast, local, AES-256 encrypted text expander and snippet manager for Windows",
+  "version": "1.7.0",
+  "description": "SnapPhrase v1.7.0 — Fast, local, AES-256 encrypted text expander and snippet manager for Windows",
   "author": "SnapPhrase Project",
   "license": "MIT",
   "main": "src/main.js",

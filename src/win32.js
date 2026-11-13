@@ -1,17 +1,19 @@
 /**
- * SnapPhrase v1.6.0 — Win32 Native Integration (Koffi FFI)
+ * SnapPhrase v1.7.0 — Win32 Native Integration (Koffi FFI)
  * Handles window focus, clipboard protection (Win+V history exclusion),
  * atomic SendInput keyboard simulation, unified Low-Level Keyboard Hook (WH_KEYBOARD_LL)
  * for Double-Tap Ctrl trigger + automatic Hotstring expansion,
  * DWM Acrylic full-screen backdrop blur, and multi-monitor aware desktop work area / window docking.
  */
 
+const path = require('path');
 const koffi = require('koffi');
 
 let user32, kernel32, dwmapi, gdi32, advapi32;
 let GetForegroundWindow, SetForegroundWindow, ShowWindow, BringWindowToTop, AttachThreadInput;
 let OpenClipboard, CloseClipboard, RegisterClipboardFormatA, SetClipboardData;
 let GlobalAlloc, GlobalLock, GlobalUnlock, GlobalFree, GetCurrentThreadId;
+let OpenProcess, QueryFullProcessImageNameW, CloseHandle;
 let keybd_event, SendInput, GetAsyncKeyState, GetKeyState, MapVirtualKeyW;
 let GetWindowThreadProcessId, GetKeyboardLayout, ToUnicodeEx;
 let SetWindowsHookExW, UnhookWindowsHookEx, CallNextHookEx;
@@ -49,6 +51,13 @@ try {
   GlobalUnlock = kernel32.func('GlobalUnlock', 'bool', ['intptr_t']);
   GlobalFree = kernel32.func('GlobalFree', 'intptr_t', ['intptr_t']);
   GetCurrentThreadId = kernel32.func('uint32 __stdcall GetCurrentThreadId()');
+  OpenProcess = kernel32.func(
+    'intptr_t __stdcall OpenProcess(uint32 dwDesiredAccess, bool bInheritHandle, uint32 dwProcessId)'
+  );
+  QueryFullProcessImageNameW = kernel32.func(
+    'bool __stdcall QueryFullProcessImageNameW(intptr_t hProcess, uint32 dwFlags, _Out_ uint16 *lpExeName, _Inout_ uint32 *lpdwSize)'
+  );
+  CloseHandle = kernel32.func('bool __stdcall CloseHandle(intptr_t hObject)');
 
   keybd_event = user32.func('keybd_event', 'void', ['uint8_t', 'uint8_t', 'uint32_t', 'uintptr_t']);
   GetAsyncKeyState = user32.func('GetAsyncKeyState', 'int16_t', ['int']);
@@ -251,6 +260,33 @@ const VK_LMENU = 0xA4;
 const VK_RMENU = 0xA5;
 
 let lastForegroundHwnd = 0;
+
+function getWindowProcessName(hwnd) {
+  if (!hwnd || !GetWindowThreadProcessId || !OpenProcess || !QueryFullProcessImageNameW || !CloseHandle) {
+    return '';
+  }
+  try {
+    const pidBuf = Buffer.alloc(4);
+    GetWindowThreadProcessId(hwnd, pidBuf);
+    const pid = pidBuf.readUInt32LE(0);
+    if (!pid) return '';
+
+    const PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
+    const hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
+    if (!hProc) return '';
+    try {
+      const nameBuf = new Uint16Array(520);
+      const sizeBox = [520];
+      if (QueryFullProcessImageNameW(hProc, 0, nameBuf, sizeBox) && sizeBox[0] > 0) {
+        const fullPath = Buffer.from(nameBuf.buffer, 0, sizeBox[0] * 2).toString('utf16le');
+        return path.basename(fullPath);
+      }
+    } finally {
+      CloseHandle(hProc);
+    }
+  } catch (e) {}
+  return '';
+}
 
 function captureForegroundWindow(excludeHwnds = []) {
   if (GetForegroundWindow) {
@@ -535,6 +571,7 @@ let keyboardHookHandle = 0;
 let keyboardCallbackPtr = null;
 let typedBuffer = '';
 let lastTypedHwnd = 0;
+let lastTypedExeLower = '';
 let isExpandingHotstring = false;
 
 // Double-Tap Ctrl state
@@ -570,6 +607,8 @@ function isAnyMouseButtonDown() {
 
 function resetHotstringBuffer() {
   typedBuffer = '';
+  lastTypedHwnd = 0;
+  lastTypedExeLower = '';
 }
 
 /**
@@ -581,6 +620,7 @@ function resetHotstringBuffer() {
  *   getTriggers: () => Array,
  *   onHotstringMatch: (match: object, fgHwnd: number) => void,
  *   getExcludeHwnds: () => number[],
+ *   isAppExcluded?: (exeLower: string) => boolean,
  * }} options
  */
 function startKeyboardHook(options) {
@@ -600,6 +640,7 @@ function startKeyboardHook(options) {
 
   typedBuffer = '';
   lastTypedHwnd = 0;
+  lastTypedExeLower = '';
   ctrlDownTime = 0;
   ctrlInvalidated = false;
   lastValidCtrlTapUpTime = 0;
@@ -688,74 +729,83 @@ function startKeyboardHook(options) {
                 if (fgHwnd !== lastTypedHwnd) {
                   typedBuffer = '';
                   lastTypedHwnd = fgHwnd;
+                  lastTypedExeLower = getWindowProcessName(fgHwnd).toLowerCase();
                 }
 
-                const isShift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) !== 0;
-                const isCtrl = (GetAsyncKeyState(VK_CONTROL) & 0x8000) !== 0;
-                const isAlt = (GetAsyncKeyState(VK_MENU) & 0x8000) !== 0;
-                const isRightAlt = (GetAsyncKeyState(VK_RMENU) & 0x8000) !== 0;
-                const isWin =
-                  (GetAsyncKeyState(VK_LWIN) & 0x8000) !== 0 ||
-                  (GetAsyncKeyState(VK_RWIN) & 0x8000) !== 0;
-
-                const isAltGr = isCtrl && isRightAlt;
-                const isCommandShortcut = (isCtrl && !isAltGr) || (isAlt && !isAltGr) || isWin;
-
-                if (isCommandShortcut || BUFFER_RESET_VKS.has(vk)) {
+                if (
+                  lastTypedExeLower &&
+                  typeof options.isAppExcluded === 'function' &&
+                  options.isAppExcluded(lastTypedExeLower)
+                ) {
                   typedBuffer = '';
-                } else if (vk === VK_BACK) {
-                  if (typedBuffer.length > 0) {
-                    const chars = Array.from(typedBuffer);
-                    chars.pop();
-                    typedBuffer = chars.join('');
-                  }
                 } else {
-                  const triggers = typeof options.getTriggers === 'function' ? options.getTriggers() : null;
-                  if (triggers && triggers.length > 0) {
-                    keyState.fill(0);
-                    if (isShift) {
-                      keyState[VK_SHIFT] = 0x80;
-                      keyState[VK_LSHIFT] = 0x80;
-                    }
-                    if (GetKeyState && (GetKeyState(VK_CAPITAL) & 0x0001) !== 0) {
-                      keyState[VK_CAPITAL] = 0x01;
-                    }
-                    if (isAltGr) {
-                      keyState[VK_CONTROL] = 0x80;
-                      keyState[VK_LCONTROL] = 0x80;
-                      keyState[VK_MENU] = 0x80;
-                      keyState[VK_RMENU] = 0x80;
-                    }
+                  const isShift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) !== 0;
+                  const isCtrl = (GetAsyncKeyState(VK_CONTROL) & 0x8000) !== 0;
+                  const isAlt = (GetAsyncKeyState(VK_MENU) & 0x8000) !== 0;
+                  const isRightAlt = (GetAsyncKeyState(VK_RMENU) & 0x8000) !== 0;
+                  const isWin =
+                    (GetAsyncKeyState(VK_LWIN) & 0x8000) !== 0 ||
+                    (GetAsyncKeyState(VK_RWIN) & 0x8000) !== 0;
 
-                    const tid = GetWindowThreadProcessId ? GetWindowThreadProcessId(fgHwnd, null) : 0;
-                    const hkl = GetKeyboardLayout ? GetKeyboardLayout(tid) : 0;
+                  const isAltGr = isCtrl && isRightAlt;
+                  const isCommandShortcut = (isCtrl && !isAltGr) || (isAlt && !isAltGr) || isWin;
 
-                    const len = ToUnicodeEx(vk, info.scanCode, keyState, charBuf, charBuf.length, 0x04, hkl);
-                    if (len > 0) {
-                      const ch = String.fromCharCode(...charBuf.subarray(0, len));
-                      if (ch >= ' ') {
-                        typedBuffer += ch;
-                        if (typedBuffer.length > 48) {
-                          typedBuffer = typedBuffer.slice(-48);
-                        }
+                  if (isCommandShortcut || BUFFER_RESET_VKS.has(vk)) {
+                    typedBuffer = '';
+                  } else if (vk === VK_BACK) {
+                    if (typedBuffer.length > 0) {
+                      const chars = Array.from(typedBuffer);
+                      chars.pop();
+                      typedBuffer = chars.join('');
+                    }
+                  } else {
+                    const triggers = typeof options.getTriggers === 'function' ? options.getTriggers() : null;
+                    if (triggers && triggers.length > 0) {
+                      keyState.fill(0);
+                      if (isShift) {
+                        keyState[VK_SHIFT] = 0x80;
+                        keyState[VK_LSHIFT] = 0x80;
+                      }
+                      if (GetKeyState && (GetKeyState(VK_CAPITAL) & 0x0001) !== 0) {
+                        keyState[VK_CAPITAL] = 0x01;
+                      }
+                      if (isAltGr) {
+                        keyState[VK_CONTROL] = 0x80;
+                        keyState[VK_LCONTROL] = 0x80;
+                        keyState[VK_MENU] = 0x80;
+                        keyState[VK_RMENU] = 0x80;
+                      }
 
-                        const bufLower = typedBuffer.toLowerCase();
-                        for (let i = 0; i < triggers.length; i++) {
-                          const t = triggers[i];
-                          if (bufLower.endsWith(t.triggerLower)) {
-                            typedBuffer = '';
-                            isExpandingHotstring = true;
-                            lastForegroundHwnd = fgHwnd;
-                            setTimeout(() => {
-                              try {
-                                options.onHotstringMatch(t, fgHwnd);
-                              } finally {
-                                setTimeout(() => {
-                                  isExpandingHotstring = false;
-                                }, 80);
-                              }
-                            }, 18);
-                            break;
+                      const tid = GetWindowThreadProcessId ? GetWindowThreadProcessId(fgHwnd, null) : 0;
+                      const hkl = GetKeyboardLayout ? GetKeyboardLayout(tid) : 0;
+
+                      const len = ToUnicodeEx(vk, info.scanCode, keyState, charBuf, charBuf.length, 0x04, hkl);
+                      if (len > 0) {
+                        const ch = String.fromCharCode(...charBuf.subarray(0, len));
+                        if (ch >= ' ') {
+                          typedBuffer += ch;
+                          if (typedBuffer.length > 48) {
+                            typedBuffer = typedBuffer.slice(-48);
+                          }
+
+                          const bufLower = typedBuffer.toLowerCase();
+                          for (let i = 0; i < triggers.length; i++) {
+                            const t = triggers[i];
+                            if (bufLower.endsWith(t.triggerLower)) {
+                              typedBuffer = '';
+                              isExpandingHotstring = true;
+                              lastForegroundHwnd = fgHwnd;
+                              setTimeout(() => {
+                                try {
+                                  options.onHotstringMatch(t, fgHwnd);
+                                } finally {
+                                  setTimeout(() => {
+                                    isExpandingHotstring = false;
+                                  }, 80);
+                                }
+                              }, 18);
+                              break;
+                            }
                           }
                         }
                       }
@@ -802,6 +852,8 @@ function stopKeyboardHook() {
     keyboardCallbackPtr = null;
   }
   typedBuffer = '';
+  lastTypedHwnd = 0;
+  lastTypedExeLower = '';
   ctrlDownTime = 0;
   ctrlInvalidated = false;
   lastValidCtrlTapUpTime = 0;
@@ -1533,6 +1585,7 @@ function syncWindowsAutostartOnLaunch(options = {}) {
 }
 
 module.exports = {
+  getWindowProcessName,
   captureForegroundWindow,
   setLastForegroundWindow,
   getLastForegroundWindow,

@@ -62,6 +62,8 @@ const genericHeaderFiles = [
   'src/crypto.js',
   'src/preload.js',
   'src/updater.js',
+  'src/templates.js',
+  'src/markdown.js',
   'ui/app.js',
   'ui/style.css',
 ];

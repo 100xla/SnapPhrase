@@ -1,5 +1,5 @@
 /**
- * SnapPhrase v1.6.0 — Main Process
+ * SnapPhrase v1.7.0 — Main Process
  * Supports:
  * - Centered Spotlight Mode (Apple-inspired floating palette with smooth blurred & dimmed desktop backdrop)
  * - Automatic Bilingual UI & Templates (Auto-detects Windows language DE/EN + manual switch in Settings)
@@ -32,10 +32,12 @@ const fs = require('fs');
 const Storage = require('./storage');
 const win32 = require('./win32');
 const { SnapPhraseUpdater } = require('./updater');
+const { resolveTemplates: resolveTemplatesCore } = require('./templates');
+const { preparePastePayloads } = require('./markdown');
 
 const APP_ID = 'com.snapphrase.app';
 const APP_NAME = 'SnapPhrase';
-const APP_VERSION = '1.6.0';
+const APP_VERSION = '1.7.0';
 const CENTER_WIDTH_STANDARD = 1120;
 const CENTER_HEIGHT_STANDARD = 780;
 const CENTER_WIDTH_COMPACT = 580;
@@ -58,6 +60,7 @@ let isQuitting = false;
 let isSystemDialogOpen = false;
 let isRecordingHotkey = false;
 let hotstringTriggers = [];
+let excludedAppsSet = new Set();
 let pendingPromptClipboard = null;
 let isMainRendererReady = false;
 let pendingShowRequest = null;
@@ -666,8 +669,23 @@ function rebuildHotstringTriggers() {
   hotstringTriggers = list;
 }
 
+function rebuildExcludedAppsSet() {
+  excludedAppsSet = new Set(storage ? storage.getExcludedApps() : []);
+}
+
+function getLastExternalForegroundApp() {
+  const hwnd = win32.getLastForegroundWindow();
+  if (!hwnd) return '';
+  const exe = win32.getWindowProcessName(hwnd);
+  if (!exe) return '';
+  const norm = Storage.normalizeAppName(exe);
+  if (!norm || norm === 'snapphrase.exe') return '';
+  return norm;
+}
+
 function restartKeyboardHook() {
   rebuildHotstringTriggers();
+  rebuildExcludedAppsSet();
 
   const useDoubleTap = storage.getDoubleTapCtrlEnabled();
   const useHotstrings = storage.getHotstringsEnabled() && !storage.isLocked;
@@ -680,6 +698,7 @@ function restartKeyboardHook() {
       getTriggers: () => hotstringTriggers,
       onHotstringMatch: handleHotstringMatch,
       getExcludeHwnds: getOwnWindowHwnds,
+      isAppExcluded: (exeLower) => Boolean(exeLower && excludedAppsSet.has(exeLower)),
     });
   } else {
     win32.stopKeyboardHook();
@@ -713,7 +732,9 @@ function handleHotstringMatch(match, targetHwnd) {
   }
 
   setTimeout(async () => {
-    await executePaste(rawContent, savedClipboard);
+    await executePaste(rawContent, savedClipboard, {
+      richText: Boolean(match.snippet.richText),
+    });
     storage.incrementUsage(match.snippet.title);
     rebuildHotstringTriggers();
     markDataDirtyAndSync();
@@ -748,11 +769,14 @@ function sendDataToRenderer(options = {}) {
     doubleTapCtrlEnabled: storage.getDoubleTapCtrlEnabled(),
     hotstringsEnabled: storage.getHotstringsEnabled(),
     hotstringPrefix: storage.getHotstringPrefix(),
+    excludedApps: storage.getExcludedApps(),
+    lastForegroundApp: getLastExternalForegroundApp(),
     restoreClipboard: storage.getRestoreClipboard(),
     activeHotkeys: storage.getActiveHotkeys(),
     autostart: getAutostartEnabled(),
     updateState: updater ? updater.getState() : null,
     insets: ctx.workAreaInsets,
+    rollingBackups: storage.isLocked ? [] : storage.listRollingBackups(),
     snippets: storage.isLocked ? [] : storage.getSnippets(),
     categories: storage.isLocked ? [] : storage.getCategories(),
   };
@@ -875,6 +899,7 @@ function showWindow(options = {}) {
     centerCompact: storage.getCenterCompact(),
     sidebarWidth: storage.getSidebarWidth(),
     isLocked: storage.isLocked,
+    lastForegroundApp: getLastExternalForegroundApp(),
     insets: ctx ? ctx.workAreaInsets : { top: 0, right: 0, bottom: 0, left: 0 },
     wasHidden,
     wasEffectivelyVisible,
@@ -981,83 +1006,13 @@ function toggleWindow(forceShow = false, source = 'auto') {
 }
 
 // ============================================================================
-// Template & Paste Engine (Bilingual DE + EN Placeholders)
+// Template & Paste Engine (Bilingual DE + EN Placeholders + Rich-Text)
 // ============================================================================
-const GERMAN_WEEKDAYS = ['Sonntag', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag'];
-const GERMAN_WEEKDAYS_SHORT = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'];
-const GERMAN_MONTHS = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'];
-const GERMAN_MONTHS_SHORT = ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'];
-
-const ENGLISH_WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-const ENGLISH_WEEKDAYS_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const ENGLISH_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-const ENGLISH_MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
-function formatDateTimeCustom(d, fmt) {
-  const pad = (n) => String(n).padStart(2, '0');
-  const YYYY = String(d.getFullYear());
-  const YY = YYYY.slice(-2);
-  const M = d.getMonth() + 1;
-  const MM = pad(M);
-  const D = d.getDate();
-  const DD = pad(D);
-  const H = d.getHours();
-  const HH = pad(H);
-  const h = H % 12 || 12;
-  const hh = pad(h);
-  const m = d.getMinutes();
-  const mm = pad(m);
-  const s = d.getSeconds();
-  const ss = pad(s);
-
-  return fmt
-    .replace(/\bYYYY\b/g, YYYY)
-    .replace(/\byyyy\b/g, YYYY)
-    .replace(/\bYY\b/g, YY)
-    .replace(/\byy\b/g, YY)
-    .replace(/\bMM\b/g, MM)
-    .replace(/\bDD\b/g, DD)
-    .replace(/\bdd\b/g, DD)
-    .replace(/\bHH\b/g, HH)
-    .replace(/\bhh\b/g, hh)
-    .replace(/\bmm\b/g, mm)
-    .replace(/\bss\b/g, ss);
-}
-
 function resolveTemplates(text, sourceClipboardText = null) {
-  let resolved = text || '';
-  const now = new Date();
-  const pad = (n) => String(n).padStart(2, '0');
-  const defaultDate = `${pad(now.getDate())}.${pad(now.getMonth() + 1)}.${now.getFullYear()}`;
-  const defaultTime = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
-
-  resolved = resolved.replace(/\{(?:datum|date):([+-]\d+)d?\}/gi, (match, offsetStr) => {
-    const offset = parseInt(offsetStr, 10);
-    const relDate = new Date();
-    relDate.setDate(relDate.getDate() + offset);
-    return `${pad(relDate.getDate())}.${pad(relDate.getMonth() + 1)}.${relDate.getFullYear()}`;
+  return resolveTemplatesCore(text, sourceClipboardText, {
+    effectiveLanguage: storage ? storage.getEffectiveLanguage() : 'de',
+    readClipboardText: () => clipboard.readText() || '',
   });
-
-  resolved = resolved.replace(/\{wochentag\}/gi, GERMAN_WEEKDAYS[now.getDay()]);
-  resolved = resolved.replace(/\{wochentag_kurz\}/gi, GERMAN_WEEKDAYS_SHORT[now.getDay()]);
-  resolved = resolved.replace(/\{monat\}/gi, GERMAN_MONTHS[now.getMonth()]);
-  resolved = resolved.replace(/\{monat_kurz\}/gi, GERMAN_MONTHS_SHORT[now.getMonth()]);
-
-  resolved = resolved.replace(/\{weekday\}/gi, ENGLISH_WEEKDAYS[now.getDay()]);
-  resolved = resolved.replace(/\{weekday_short\}/gi, ENGLISH_WEEKDAYS_SHORT[now.getDay()]);
-  resolved = resolved.replace(/\{month\}/gi, ENGLISH_MONTHS[now.getMonth()]);
-  resolved = resolved.replace(/\{month_short\}/gi, ENGLISH_MONTHS_SHORT[now.getMonth()]);
-
-  resolved = resolved.replace(/\{(?:datum|date):([^}]+)\}/gi, (m, fmt) => formatDateTimeCustom(now, fmt));
-  resolved = resolved.replace(/\{(?:datum|date)\}/gi, defaultDate);
-  resolved = resolved.replace(/\{(?:zeit|time):([^}]+)\}/gi, (m, fmt) => formatDateTimeCustom(now, fmt));
-  resolved = resolved.replace(/\{(?:zeit|time)\}/gi, defaultTime);
-
-  const clipContent = sourceClipboardText !== null ? sourceClipboardText : (clipboard.readText() || '');
-  resolved = resolved.replace(/\{clipboard\}/gi, () => clipContent);
-  resolved = resolved.replace(/\{n\}/gi, '\n');
-
-  return resolved;
 }
 
 function snapshotClipboard() {
@@ -1083,8 +1038,9 @@ function restoreClipboardSnapshot(snap, expectedInjectedText = null) {
   if (snap === null || snap === undefined) return;
   try {
     if (expectedInjectedText !== null) {
-      const currentText = clipboard.readText() || '';
-      if (currentText !== expectedInjectedText) {
+      const normalizeNl = (v) => String(v || '').replace(/\r\n/g, '\n');
+      const currentText = normalizeNl(clipboard.readText() || '');
+      if (currentText !== normalizeNl(expectedInjectedText)) {
         return;
       }
     }
@@ -1112,23 +1068,20 @@ function restoreClipboardSnapshot(snap, expectedInjectedText = null) {
   } catch (e) {}
 }
 
-async function executePaste(text, savedClipboardOverride = null) {
+async function executePaste(text, savedClipboardOverride = null, options = {}) {
+  const { richText = false } = options;
   const previousSnap = savedClipboardOverride !== null ? savedClipboardOverride : snapshotClipboard();
   const previousText = typeof previousSnap === 'string' ? previousSnap : (previousSnap.text || '');
-  let resolved = resolveTemplates(text, previousText);
-
-  let cursorOffset = 0;
-  const cursorIdx = resolved.indexOf('{cursor}');
-  if (cursorIdx !== -1) {
-    const before = resolved.slice(0, cursorIdx);
-    const after = resolved.slice(cursorIdx + 8);
-    resolved = before + after;
-    cursorOffset = Array.from(after.replace(/\r/g, '')).length;
-  }
+  const resolved = resolveTemplates(text, previousText);
+  const { text: plainText, html, cursorOffset } = preparePastePayloads(resolved, { richText });
 
   await win32.waitForModifiersReleased(220);
 
-  clipboard.writeText(resolved);
+  if (html) {
+    clipboard.write({ text: plainText, html });
+  } else {
+    clipboard.writeText(plainText);
+  }
   win32.setClipboardPrivate();
 
   win32.simulatePaste();
@@ -1141,7 +1094,7 @@ async function executePaste(text, savedClipboardOverride = null) {
 
   if (storage.getRestoreClipboard()) {
     setTimeout(() => {
-      restoreClipboardSnapshot(previousSnap, resolved);
+      restoreClipboardSnapshot(previousSnap, plainText);
     }, 420);
   }
 }
@@ -1530,7 +1483,7 @@ ipcMain.on('satztresor-msg', (event, data) => {
     }
 
     case 'paste': {
-      const { title, text } = data;
+      const { title, text, richText = false, forcePlainText = false } = data;
       const savedClip = pendingPromptClipboard !== null ? pendingPromptClipboard : snapshotClipboard();
       pendingPromptClipboard = null;
 
@@ -1548,7 +1501,9 @@ ipcMain.on('satztresor-msg', (event, data) => {
           await new Promise((r) => setTimeout(r, 25));
         }
 
-        await executePaste(text, savedClip);
+        await executePaste(text, savedClip, {
+          richText: Boolean(richText) && !forcePlainText,
+        });
         if (title) {
           storage.incrementUsage(title);
           markDataDirtyAndSync();
@@ -1564,9 +1519,16 @@ ipcMain.on('satztresor-msg', (event, data) => {
     }
 
     case 'copyToClipboardOnly': {
-      const { title, text } = data;
+      const { title, text, richText = false, forcePlainText = false } = data;
       const resolved = resolveTemplates(text);
-      clipboard.writeText(resolved);
+      const { text: plainText, html } = preparePastePayloads(resolved, {
+        richText: Boolean(richText) && !forcePlainText,
+      });
+      if (html) {
+        clipboard.write({ text: plainText, html });
+      } else {
+        clipboard.writeText(plainText);
+      }
       win32.setClipboardPrivate();
       if (title) {
         storage.incrementUsage(title);
@@ -1841,6 +1803,42 @@ ipcMain.on('satztresor-msg', (event, data) => {
       break;
     }
 
+    case 'addExcludedApp': {
+      const appName = Storage.normalizeAppName(data.appName || '');
+      if (appName) {
+        const current = storage.getExcludedApps();
+        if (!current.includes(appName)) {
+          storage.setExcludedApps([...current, appName]);
+          restartKeyboardHook();
+          sendDataToRenderer();
+          mainWindow.webContents.send('satztresor-msg', {
+            type: 'showToast',
+            message: isEn()
+              ? `✓ ${appName} excluded from auto-expansion`
+              : `✓ ${appName} von Textersetzung ausgeschlossen`,
+          });
+        }
+      }
+      break;
+    }
+
+    case 'removeExcludedApp': {
+      const appName = Storage.normalizeAppName(data.appName || '');
+      if (appName) {
+        const updated = storage.getExcludedApps().filter((a) => a !== appName);
+        storage.setExcludedApps(updated);
+        restartKeyboardHook();
+        sendDataToRenderer();
+        mainWindow.webContents.send('satztresor-msg', {
+          type: 'showToast',
+          message: isEn()
+            ? `✓ ${appName} removed from exclusion list`
+            : `✓ ${appName} von Ausschlussliste entfernt`,
+        });
+      }
+      break;
+    }
+
     case 'setRestoreClipboard': {
       storage.setRestoreClipboard(!!data.enabled);
       sendDataToRenderer();
@@ -1941,6 +1939,38 @@ ipcMain.on('satztresor-msg', (event, data) => {
 
     case 'openDataFolder': {
       shell.openPath(path.dirname(storageFile));
+      break;
+    }
+
+    case 'restoreBackup': {
+      const fileName = String(data.fileName || '').trim();
+      if (!fileName) break;
+      const res = storage.restoreRollingBackup(fileName);
+      if (res.success) {
+        registerHotkeys();
+        restartKeyboardHook();
+        syncSystemTheme();
+        syncNativeBackdrop();
+        syncWindowGeometry();
+        sendDataToRenderer();
+        updateTrayMenu();
+        mainWindow.webContents.send('satztresor-msg', {
+          type: 'showToast',
+          message: isEn()
+            ? `✓ Backup restored (${res.count} snippets)`
+            : `✓ Backup wiederhergestellt (${res.count} Bausteine)`,
+        });
+      } else {
+        mainWindow.webContents.send('satztresor-msg', {
+          type: 'showAppAlert',
+          title: isEn() ? 'Restore failed' : 'Wiederherstellung fehlgeschlagen',
+          message:
+            res.error ||
+            (isEn()
+              ? 'Could not restore the selected backup.'
+              : 'Das ausgewählte Backup konnte nicht wiederhergestellt werden.'),
+        });
+      }
       break;
     }
 

@@ -1,5 +1,5 @@
 /**
- * SnapPhrase v1.6.0 — Apple-Inspired Spotlight & Frosted Glass Stylesheet
+ * SnapPhrase v1.7.0 — Apple-Inspired Spotlight & Frosted Glass Stylesheet
  * Supports Dark & Light mode, Fullscreen Blurred & Dimmed Focus Backdrop,
  * Centered Spotlight layout, Softwareupdate UI, Modals, and Context Menu.
  */
@@ -1673,4 +1673,179 @@ input:checked + .slider:before {
 
 .backdrop-blur-tune-panel.hidden {
   display: none;
+}
+
+/* ============================================================================
+   v1.7.0 Enhancements: Rich-Text Toggle/Toolbar/Badge, App Filter & Backups
+   ============================================================================ */
+.manager-toggles-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.rich-toggle-btn {
+  height: 38px;
+  padding: 0 13px;
+  border-radius: 9px;
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 550;
+  font-family: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.rich-toggle-btn:hover {
+  color: var(--text-main);
+  border-color: var(--border-accent);
+}
+
+.rich-toggle-btn.active {
+  background: rgba(10, 132, 255, 0.16);
+  border-color: rgba(10, 132, 255, 0.45);
+  color: var(--accent);
+}
+
+html.light .rich-toggle-btn.active {
+  background: rgba(0, 113, 227, 0.13);
+  border-color: rgba(0, 113, 227, 0.42);
+}
+
+.markdown-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 6px;
+}
+
+.markdown-toolbar.hidden {
+  display: none;
+}
+
+.md-format-btn {
+  height: 26px;
+  padding: 0 9px;
+  border-radius: 7px;
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  color: var(--text-main);
+  font-size: 11.5px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.14s ease, border-color 0.14s ease, color 0.14s ease;
+}
+
+.md-format-btn:hover {
+  border-color: var(--border-accent);
+  background: rgba(10, 132, 255, 0.14);
+  color: var(--accent);
+}
+
+.rich-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 1.5px 6px;
+  border-radius: 5px;
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  background: rgba(10, 132, 255, 0.16);
+  border: 1px solid rgba(10, 132, 255, 0.34);
+  color: var(--accent);
+}
+
+html.light .rich-tag {
+  background: rgba(0, 113, 227, 0.11);
+  border-color: rgba(0, 113, 227, 0.28);
+}
+
+.app-filter-input-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  width: 100%;
+}
+
+.app-filter-input {
+  flex: 1 1 160px;
+  min-width: 140px;
+  height: 30px;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.backups-list-panel {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 9px;
+  background: var(--input-bg);
+  border: 1px solid var(--border-subtle);
+}
+
+.backups-list-panel.hidden {
+  display: none;
+}
+
+.backup-item-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 9px;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-subtle);
+}
+
+html.light .backup-item-row {
+  background: rgba(0, 0, 0, 0.025);
+}
+
+.backup-item-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.backup-item-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.backup-item-sub {
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.backup-empty-hint {
+  font-size: 12px;
+  color: var(--text-dim);
+  font-style: italic;
+  padding: 4px 6px;
 }

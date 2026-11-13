@@ -1,5 +1,5 @@
 /**
- * SnapPhrase v1.6.0 — Automatic Update Engine (GitHub Releases + Delta Updates + Self-Update)
+ * SnapPhrase v1.7.0 — Automatic Update Engine (GitHub Releases + Delta Updates + Self-Update)
  * - Microsoft Store builds (process.windowsStore): Self-updater disabled; managed natively by Microsoft Store.
  * - Installed NSIS builds: Silent background delta-downloads (.blockmap + SHA-512 verification)
  *   via electron-updater, installable with 1 click or automatically on next app quit,

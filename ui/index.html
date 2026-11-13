@@ -94,7 +94,7 @@
           <path d="M13 7l-3 5h4l-3 5"/>
         </svg>
         <span id="brandNameLabel">SnapPhrase</span>
-        <span id="versionTag" class="version-pill">v1.6.0</span>
+        <span id="versionTag" class="version-pill">v1.7.0</span>
       </div>
       <button id="updateReadyPill" class="update-ready-pill" style="display: none;" title="Update jetzt installieren und neu starten">
         <span class="update-dot"></span>
@@ -120,6 +120,10 @@
     <div class="context-item" id="ctxInsert">
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 10 4 15 9 20"></polyline><path d="M20 4v7a4 4 0 0 1-4 4H4"></path></svg>
       <span id="ctxInsertLabel">Einfügen</span>
+    </div>
+    <div class="context-item" id="ctxInsertPlain" style="display: none;">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="8" y1="13" x2="16" y2="13"></line><line x1="8" y1="17" x2="13" y2="17"></line></svg>
+      <span id="ctxInsertPlainLabel">Als Reintext einfügen</span>
     </div>
     <div class="context-item" id="ctxCopy">
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
@@ -197,14 +201,23 @@
             <datalist id="categoriesDatalist"></datalist>
           </div>
           <div class="form-group">
-            <span class="form-label" id="quickAccessLabel">Schnellzugriff</span>
-            <input type="checkbox" id="editFavorite" style="display: none;">
-            <button type="button" id="btnToggleEditFavorite" class="fav-toggle-btn">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
-              </svg>
-              <span id="editFavoriteLabel">Als Favorit</span>
-            </button>
+            <span class="form-label" id="quickAccessLabel">Optionen</span>
+            <div class="manager-toggles-row">
+              <input type="checkbox" id="editFavorite" style="display: none;">
+              <button type="button" id="btnToggleEditFavorite" class="fav-toggle-btn">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+                </svg>
+                <span id="editFavoriteLabel">Favorit</span>
+              </button>
+              <input type="checkbox" id="editRichText" style="display: none;">
+              <button type="button" id="btnToggleEditRichText" class="rich-toggle-btn" title="Markdown als formatierten Rich-Text (HTML) einfügen">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M4 7V4h16v3"></path><path d="M9 20h6"></path><path d="M12 4v16"></path>
+                </svg>
+                <span id="editRichTextLabel">Rich-Text</span>
+              </button>
+            </div>
           </div>
         </div>
 
@@ -213,11 +226,21 @@
             <label class="form-label" id="editContentLabel" for="editContent">Textinhalt</label>
             <span class="form-label-hint" id="editContentHint">Dynamische Platzhalter per Klick einfügen</span>
           </div>
+          <div id="markdownFormatChips" class="markdown-toolbar hidden">
+            <button type="button" class="md-format-btn" id="mdBtnBold" data-wrap="**" title="Fett (**Text**)"><b>B</b></button>
+            <button type="button" class="md-format-btn" id="mdBtnItalic" data-wrap="*" title="Kursiv (*Text*)"><i>I</i></button>
+            <button type="button" class="md-format-btn" id="mdBtnStrike" data-wrap="~~" title="Durchgestrichen (~~Text~~)"><s>S</s></button>
+            <button type="button" class="md-format-btn" id="mdBtnCode" data-wrap="`" title="Inline-Code (`Code`)">&lt;/&gt;</button>
+            <button type="button" class="md-format-btn" id="mdBtnLink" data-link="1" title="Link einfügen ([Text](https://…))">Link</button>
+            <button type="button" class="md-format-btn" id="mdBtnBullet" data-line="- " title="Aufzählungsliste (- Punkt)">• Liste</button>
+            <button type="button" class="md-format-btn" id="mdBtnHeading" data-line="## " title="Überschrift (## Titel)">H2</button>
+          </div>
           <textarea id="editContent" class="form-textarea" placeholder="Schreibe oder kopiere hier deinen Textbaustein hinein…"></textarea>
           <div class="template-chips">
             <button type="button" class="template-chip" id="chipCursor" data-insert="{cursor}" title="Setzt den Schreibcursor nach dem Einfügen exakt an diese Stelle ({cursor})">Cursor-Position</button>
             <button type="button" class="template-chip" id="chipDateToday" data-insert="{datum}" title="Aktuelles Datum einfügen ({datum})">Datum heute</button>
             <button type="button" class="template-chip" id="chipDateTomorrow" data-insert="{datum:+1d}" title="Morgiges Datum einfügen ({datum:+1d})">Morgen</button>
+            <button type="button" class="template-chip" id="chipDateIso" data-insert="{date:iso}" title="ISO-Datum einfügen ({date:iso})">ISO-Datum</button>
             <button type="button" class="template-chip" id="chipWeekday" data-insert="{wochentag}" title="Aktuellen Wochentag einfügen ({wochentag})">Wochentag</button>
             <button type="button" class="template-chip" id="chipTime" data-insert="{zeit}" title="Aktuelle Uhrzeit einfügen ({zeit})">Uhrzeit</button>
             <button type="button" class="template-chip" id="chipClipboard" data-insert="{clipboard}" title="Vorher kopierten Text aus der Zwischenablage einfügen ({clipboard})">Zwischenablage</button>
@@ -379,6 +402,21 @@
                 <option value="" id="prefixOptNone">Ohne Präfix</option>
               </select>
             </div>
+
+            <div class="settings-row settings-row-stackable" id="hotstringAppFilterRow">
+              <div class="settings-label-group">
+                <span class="settings-title" id="settingAppFilterTitle">Ausgeschlossene Apps (Auto-Ersetzung)</span>
+                <span class="settings-desc" id="settingAppFilterDesc">Deaktiviert Kürzel automatisch in Passwortmanagern, Terminals o. Ä.</span>
+              </div>
+              <div class="hotkey-manager-bar">
+                <div id="excludedAppsList" class="hotkey-chips-list"></div>
+                <div class="app-filter-input-row">
+                  <input type="text" id="excludedAppInput" class="form-input app-filter-input" placeholder="z. B. keepass.exe">
+                  <button type="button" id="btnAddExcludedApp" class="btn-record-hotkey">+ Hinzufügen</button>
+                  <button type="button" id="btnExcludeActiveApp" class="btn-record-hotkey" style="display: none;"></button>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -437,6 +475,19 @@
                 </button>
               </div>
             </div>
+
+            <div class="settings-row settings-row-stackable" id="rollingBackupsRow">
+              <div style="display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 12px;">
+                <div class="settings-label-group">
+                  <span class="settings-title" id="settingBackupsTitle">Automatische Sicherungen</span>
+                  <span class="settings-desc" id="settingBackupsDesc">Bis zu 5 lokale Snapshots vor größeren Änderungen</span>
+                </div>
+                <button type="button" id="btnToggleBackupsList" class="btn btn-secondary btn-compact-action">
+                  <span id="btnToggleBackupsLabel">Anzeigen (0)</span>
+                </button>
+              </div>
+              <div id="rollingBackupsPanel" class="backups-list-panel hidden"></div>
+            </div>
           </div>
         </div>
 
@@ -446,7 +497,7 @@
           <div class="settings-card">
             <div class="settings-row">
               <div class="settings-label-group" style="flex: 1; min-width: 0;">
-                <span class="settings-title" id="updateStatusHeadline">SnapPhrase v1.6.0</span>
+                <span class="settings-title" id="updateStatusHeadline">SnapPhrase v1.7.0</span>
                 <span class="settings-desc" id="updateStatusDesc">Automatische Hintergrund-Updates bereit</span>
                 <div id="updateProgressWrap" class="update-progress-wrap" style="display: none;">
                   <div id="updateProgressBar" class="update-progress-bar" style="width: 0%;"></div>

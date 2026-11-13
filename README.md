@@ -7,7 +7,7 @@
 
 *Dein lokaler, verschlüsselter Satzbaustein-Manager für Windows — 100 % Offline. 0 % Cloud. 0 € Abo.*
 
-[![Version](https://img.shields.io/badge/Version-1.6.0-2563eb?style=for-the-badge)](./package.json)
+[![Version](https://img.shields.io/badge/Version-1.7.0-2563eb?style=for-the-badge)](./package.json)
 [![Platform](https://img.shields.io/badge/Windows-10%20%2F%2011%20(x64)-0078d4?style=for-the-badge&logo=windows)](./package.json)
 [![Privacy](https://img.shields.io/badge/100%25%20Local-Zero%20Cloud-10b981?style=for-the-badge)](./PRIVACY.md)
 [![Encryption](https://img.shields.io/badge/AES--256-PBKDF2%20%2B%20HMAC-8b5cf6?style=for-the-badge)](./src/crypto.js)
@@ -33,7 +33,7 @@ Many modern text expanders force users into **cloud accounts, mandatory sign-ups
 | 🟢 Option 1: Microsoft Store *(Recommended)* | 🔵 Option 2: Direct Download *(Portable & Setup)* |
 | :--- | :--- |
 | **1-Click install without Windows SmartScreen warning**<br>*(Signed by Microsoft + automatic Store updates)* | **No Store login & no admin rights required**<br>*(Ideal for locked-down office PCs or USB drives)* |
-| 👉 **[Open in Microsoft Store](#)** *(Coming soon)* | 👉 **[SnapPhrase-Portable-1.6.0.exe](../../releases/latest)** *(Run directly without installation)*<br>👉 **[SnapPhrase-Setup-1.6.0.exe](../../releases/latest)** *(Classic Windows installer)* |
+| 👉 **[Open in Microsoft Store](#)** *(Coming soon)* | 👉 **[SnapPhrase-Portable-1.7.0.exe](../../releases/latest)** *(Run directly without installation)*<br>👉 **[SnapPhrase-Setup-1.7.0.exe](../../releases/latest)** *(Classic Windows installer)* |
 
 <details>
 <summary>💡 <b>Note on Direct Download (.exe): Why does Windows show a blue SmartScreen prompt on first launch?</b> (Click to expand)</summary>
@@ -63,19 +63,22 @@ SnapPhrase is a free open-source project without commercial revenue. A commercia
 ### 2. ⚡ Automatic Text Expansion (Hotstrings) While Typing
 Type your short trigger in **any Windows app** (Outlook, Word, browser, CRM, IDE) — e.g. `;;br` or `;;mfg` — and SnapPhrase expands it into your full text snippet in real time.
 * Customizable trigger prefix (`;;`, `//`, `::`, `#`, or no prefix).
+* **Excluded Apps Filter:** Disable auto-expansion inside sensitive or conflicting apps (e.g. `keepass.exe`, `bitwarden.exe`, `wt.exe`) in Settings — with zero latency overhead and a 1-click button for the last active app.
 * Pause or resume anytime with 1 click in the bottom bar (`Auto-Type` / `Auto-Tippen`).
 
-### 3. Smart Placeholders & Interactive Form Variables
+### 3. Smart Placeholders, Flexible Date Formats & Markdown Rich-Text
 Snippets support both English and German dynamic variables:
-* `{date}` / `{datum}` & `{date:+1d}` / `{datum:+1d}` / `{date:+7d}` — Today's or relative date
-* `{weekday}` / `{wochentag}` & `{time}` / `{zeit}` — Current weekday & time
+* `{date}` / `{datum}` — Default locale date (`DD.MM.YYYY`), plus format presets `{date:iso}` (`YYYY-MM-DD`), `{date:us}`, `{date:uk}`, `{date:long}`, or custom tokens (`YYYY/MM/DD`)
+* Combinable relative offsets (`+Nd`, `-Nd`, `+Nw`, `+Nm`, `+Ny`) in any order, e.g. `{date:+7d:iso}`, `{datum:+2w}`, `{date:+1m:us}`, `{date:+1y}`
+* `{weekday}` / `{wochentag}` & `{time}` / `{zeit}` (`{time:12h}`, `{time:sec}`) — Current weekday & time
 * `{clipboard}` — Current clipboard text
-* `{cursor}` — Places the typing cursor at this exact position after pasting
-* `{?Name}` — Opens a quick input prompt for `Name` before pasting
-* `{?Salutation=Ms.|Mr.|Hello}` / `{?Anrede=Frau|Herr|Guten Tag}` — Opens a dropdown menu before pasting
+* `{cursor}` — Places the typing cursor at this exact position after pasting (calculated cleanly on visible text even in Rich-Text mode)
+* `{?Name}` & `{?Salutation=Ms.|Mr.|Hello}` — Quick input prompts & dropdowns before pasting
+* **Opt-in Rich-Text (Markdown):** Enable the `Rich-Text` toggle per snippet to format bold, italic, links, headings, lists, and code as native HTML clipboard payloads (use `Ctrl + Shift + Enter` or the context menu to force plain text anytime).
 
 ### 4. Keyboard-First Spotlight Palette & Pin Mode
 * `Enter` (`↵`) — Insert selected snippet into active window
+* `Ctrl + Shift + Enter` — Insert a Rich-Text snippet as plain text (`Als Reintext einfügen`)
 * `Shift + Enter` (`Shift+↵`) or `Ctrl + C` — Copy snippet to clipboard without pasting
 * `Alt + 1..9` — Instant paste of the top 1–9 matches
 * `Tab` — Edit selected snippet
@@ -84,6 +87,9 @@ Snippets support both English and German dynamic variables:
 * `Alt + F` — Toggle favorite star
 * `Ctrl + P` — Toggle **Pin Mode** (keeps SnapPhrase floating on top)
 * `Ctrl + L` — Lock encrypted database immediately
+
+### 5. 💾 Automatic Local Rolling Backups
+Before deletes, edits, or imports, SnapPhrase keeps up to **5 throttled local snapshots** (encrypted whenever AES-256 vault protection is active). View and restore any snapshot in **Settings → Data & Security** while keeping your current preferences intact.
 
 ---
 

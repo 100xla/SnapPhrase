@@ -1,5 +1,5 @@
 /**
- * SnapPhrase v1.6.0 — Electron Preload Script
+ * SnapPhrase v1.7.0 — Electron Preload Script
  * Secure IPC Bridge between Renderer UI and Main Process.
  */
 

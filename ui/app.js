@@ -1,5 +1,5 @@
 /**
- * SnapPhrase v1.6.0 — Renderer Application Logic
+ * SnapPhrase v1.7.0 — Renderer Application Logic
  * Apple-inspired Spotlight UI with token search, smart template prompts, hotstring configuration,
  * automatic DE/EN localization, background software updates, non-blocking confirmation modals,
  * custom context menu, favorites, and encryption management.
@@ -16,7 +16,7 @@
   }
 
   const state = {
-    version: '1.6.0',
+    version: '1.7.0',
     language: 'auto', // 'auto' | 'de' | 'en'
     effectiveLanguage: detectBrowserLanguage(), // 'de' | 'en'
     isWindowsStore: false,
@@ -35,6 +35,11 @@
     doubleTapCtrlEnabled: true,
     hotstringsEnabled: true,
     hotstringPrefix: ';;',
+    excludedApps: [],
+    lastForegroundApp: '',
+    rollingBackups: [],
+    backupsPanelOpen: false,
+    forcePlainTextForPrompt: false,
     restoreClipboard: true,
     activeHotkeys: ['Control+Space'],
     isRecordingHotkey: false,
@@ -102,6 +107,10 @@
   const editFavorite = document.getElementById('editFavorite');
   const btnToggleEditFavorite = document.getElementById('btnToggleEditFavorite');
   const editFavoriteLabel = document.getElementById('editFavoriteLabel');
+  const editRichText = document.getElementById('editRichText');
+  const btnToggleEditRichText = document.getElementById('btnToggleEditRichText');
+  const editRichTextLabel = document.getElementById('editRichTextLabel');
+  const markdownFormatChips = document.getElementById('markdownFormatChips');
   const categoriesDatalist = document.getElementById('categoriesDatalist');
   const btnDuplicateFromManager = document.getElementById('btnDuplicateFromManager');
   const btnDeleteSnippet = document.getElementById('btnDeleteSnippet');
@@ -126,6 +135,11 @@
   const settingHotstringsEnabled = document.getElementById('settingHotstringsEnabled');
   const settingHotstringPrefix = document.getElementById('settingHotstringPrefix');
   const hotstringPrefixRow = document.getElementById('hotstringPrefixRow');
+  const hotstringAppFilterRow = document.getElementById('hotstringAppFilterRow');
+  const excludedAppsList = document.getElementById('excludedAppsList');
+  const excludedAppInput = document.getElementById('excludedAppInput');
+  const btnAddExcludedApp = document.getElementById('btnAddExcludedApp');
+  const btnExcludeActiveApp = document.getElementById('btnExcludeActiveApp');
   const hotstringDescPreview = document.getElementById('hotstringDescPreview');
   const settingDoubleTapCtrl = document.getElementById('settingDoubleTapCtrl');
   const activeHotkeysList = document.getElementById('activeHotkeysList');
@@ -137,6 +151,10 @@
   const cryptoSettingsBtnLabel = document.getElementById('cryptoSettingsBtnLabel');
   const btnOpenCryptoFromSettings = document.getElementById('btnOpenCryptoFromSettings');
   const btnLockFromSettings = document.getElementById('btnLockFromSettings');
+  const rollingBackupsRow = document.getElementById('rollingBackupsRow');
+  const btnToggleBackupsList = document.getElementById('btnToggleBackupsList');
+  const btnToggleBackupsLabel = document.getElementById('btnToggleBackupsLabel');
+  const rollingBackupsPanel = document.getElementById('rollingBackupsPanel');
   const updateStatusHeadline = document.getElementById('updateStatusHeadline');
   const updateStatusDesc = document.getElementById('updateStatusDesc');
   const updateProgressWrap = document.getElementById('updateProgressWrap');
@@ -186,6 +204,7 @@
   // Custom Context Menu
   const contextMenu = document.getElementById('contextMenu');
   const ctxInsert = document.getElementById('ctxInsert');
+  const ctxInsertPlain = document.getElementById('ctxInsertPlain');
   const ctxCopy = document.getElementById('ctxCopy');
   const ctxFavorite = document.getElementById('ctxFavorite');
   const ctxFavoriteLabel = document.getElementById('ctxFavoriteLabel');
@@ -258,6 +277,7 @@
 
     // Context menu
     setTextById('ctxInsertLabel', en ? 'Insert' : 'Einfügen');
+    setTextById('ctxInsertPlainLabel', en ? 'Insert as plain text' : 'Als Reintext einfügen');
     setTextById('ctxCopyLabel', en ? 'Copy only' : 'Nur kopieren');
     setTextById('ctxEditLabel', en ? 'Edit…' : 'Bearbeiten…');
     setTextById('ctxDuplicateLabel', en ? 'Duplicate' : 'Duplizieren');
@@ -283,7 +303,28 @@
         ? 'e.g. Email, Sales, Support'
         : 'z. B. E-Mail, Angebot, Support';
     }
-    setTextById('quickAccessLabel', en ? 'Quick Access' : 'Schnellzugriff');
+    setTextById('quickAccessLabel', en ? 'Options' : 'Optionen');
+    if (btnToggleEditRichText) {
+      btnToggleEditRichText.title = en
+        ? 'Paste Markdown as formatted Rich-Text (HTML)'
+        : 'Markdown als formatierten Rich-Text (HTML) einfügen';
+    }
+    const mdBtnConfigs = [
+      { id: 'mdBtnBold', title: en ? 'Bold (**text**)' : 'Fett (**Text**)' },
+      { id: 'mdBtnItalic', title: en ? 'Italic (*text*)' : 'Kursiv (*Text*)' },
+      { id: 'mdBtnStrike', title: en ? 'Strikethrough (~~text~~)' : 'Durchgestrichen (~~Text~~)' },
+      { id: 'mdBtnCode', title: en ? 'Inline code (`code`)' : 'Inline-Code (`Code`)' },
+      { id: 'mdBtnLink', title: en ? 'Insert link ([text](https://…))' : 'Link einfügen ([Text](https://…))' },
+      { id: 'mdBtnBullet', label: en ? '• List' : '• Liste', title: en ? 'Bullet list (- item)' : 'Aufzählungsliste (- Punkt)' },
+      { id: 'mdBtnHeading', title: en ? 'Heading (## title)' : 'Überschrift (## Titel)' },
+    ];
+    mdBtnConfigs.forEach((cfg) => {
+      const btn = document.getElementById(cfg.id);
+      if (btn) {
+        if (cfg.label) btn.textContent = cfg.label;
+        if (cfg.title) btn.title = cfg.title;
+      }
+    });
     setTextById('editContentLabel', en ? 'Snippet Content' : 'Textinhalt');
     setTextById(
       'editContentHint',
@@ -316,6 +357,12 @@
         insert: en ? '{date:+1d}' : '{datum:+1d}',
         label: en ? 'Tomorrow' : 'Morgen',
         title: en ? "Insert tomorrow's date ({date:+1d})" : 'Morgiges Datum einfügen ({datum:+1d})',
+      },
+      {
+        id: 'chipDateIso',
+        insert: '{date:iso}',
+        label: en ? 'ISO Date' : 'ISO-Datum',
+        title: en ? 'Insert ISO date YYYY-MM-DD ({date:iso})' : 'ISO-Datum JJJJ-MM-TT einfügen ({date:iso})',
       },
       {
         id: 'chipWeekday',
@@ -435,6 +482,19 @@
     setTextById('prefixOpt3', en ? ':: (e.g. ::br)' : ':: (z. B. ::mfg)');
     setTextById('prefixOpt4', en ? '# (e.g. #br)' : '# (z. B. #mfg)');
     setTextById('prefixOptNone', en ? 'No prefix' : 'Ohne Präfix');
+    setTextById('settingAppFilterTitle', en ? 'Excluded Apps (Auto-Type)' : 'Ausgeschlossene Apps (Auto-Ersetzung)');
+    setTextById(
+      'settingAppFilterDesc',
+      en
+        ? 'Automatically disables triggers in password managers, terminals, etc.'
+        : 'Deaktiviert Kürzel automatisch in Passwortmanagern, Terminals o. Ä.'
+    );
+    if (excludedAppInput) {
+      excludedAppInput.placeholder = en ? 'e.g. keepass.exe' : 'z. B. keepass.exe';
+    }
+    if (btnAddExcludedApp) {
+      btnAddExcludedApp.textContent = en ? '+ Add' : '+ Hinzufügen';
+    }
 
     setTextById('settingsHeaderVault', en ? 'Data & Security' : 'Daten & Tresor');
     setTextById('settingBackupTitle', en ? 'Backup & Restore Snippets' : 'Bausteine sichern & laden');
@@ -453,6 +513,13 @@
     }
     setTextById('settingCryptoTitle', en ? 'Password Protection (AES-256)' : 'Passwortschutz (AES-256)');
     setTextById('btnLockFromSettingsLabel', en ? 'Lock' : 'Sperren');
+    setTextById('settingBackupsTitle', en ? 'Automatic Rolling Backups' : 'Automatische Sicherungen');
+    setTextById(
+      'settingBackupsDesc',
+      en
+        ? 'Up to 5 local snapshots created before major changes'
+        : 'Bis zu 5 lokale Snapshots vor größeren Änderungen'
+    );
 
     setTextById('settingsHeaderUpdate', en ? 'Software Update' : 'Softwareupdate');
     setTextById('settingAutoUpdateTitle', en ? 'Update automatically' : 'Automatisch aktualisieren');
@@ -511,7 +578,10 @@
     updateSecurityButtonsUI();
     updateHotstringUI();
     syncEditFavoriteButtonUI();
+    syncEditRichTextButtonUI();
     renderActiveHotkeys();
+    renderExcludedApps();
+    renderRollingBackups();
     renderUpdateUI();
     renderedCategoriesKey = '';
     lastRenderedListKey = '';
@@ -648,6 +718,15 @@
         if (typeof data.hotstringPrefix === 'string') {
           state.hotstringPrefix = data.hotstringPrefix;
         }
+        if (Array.isArray(data.excludedApps)) {
+          state.excludedApps = data.excludedApps;
+        }
+        if (typeof data.lastForegroundApp === 'string') {
+          state.lastForegroundApp = data.lastForegroundApp;
+        }
+        if (Array.isArray(data.rollingBackups)) {
+          state.rollingBackups = data.rollingBackups;
+        }
         if (typeof data.doubleTapCtrlEnabled !== 'undefined') {
           state.doubleTapCtrlEnabled = !!data.doubleTapCtrlEnabled;
           if (settingDoubleTapCtrl) settingDoubleTapCtrl.checked = state.doubleTapCtrlEnabled;
@@ -674,6 +753,8 @@
           updateSecurityButtonsUI();
           updateHotstringUI();
           renderActiveHotkeys();
+          renderExcludedApps();
+          renderRollingBackups();
           filterAndRender();
         }
         break;
@@ -725,6 +806,10 @@
         }
         if (typeof data.centerCompact !== 'undefined') state.centerCompact = !!data.centerCompact;
         if (typeof data.isLocked !== 'undefined') state.isLocked = !!data.isLocked;
+        if (typeof data.lastForegroundApp === 'string') {
+          state.lastForegroundApp = data.lastForegroundApp;
+          renderExcludedApps();
+        }
         if (data.insets) applyWorkAreaInsets(data.insets);
 
         updateLayoutUI();
@@ -831,7 +916,7 @@
         if (!state.isLocked && data.snippet) {
           closeAllModals();
           closeContextMenu();
-          openPromptModal(data.snippet);
+          openPromptModal(data.snippet, { forcePlainText: false });
         }
         break;
 
@@ -909,6 +994,9 @@
           ? 'Set up…'
           : 'Einrichten…';
     }
+    if (rollingBackupsRow) {
+      rollingBackupsRow.style.display = state.isLocked ? 'none' : '';
+    }
   }
 
   function updateEditKuerzelLiveBadge() {
@@ -965,6 +1053,10 @@
     if (hotstringPrefixRow) {
       hotstringPrefixRow.style.opacity = state.hotstringsEnabled ? '1' : '0.45';
       hotstringPrefixRow.style.pointerEvents = state.hotstringsEnabled ? 'auto' : 'none';
+    }
+    if (hotstringAppFilterRow) {
+      hotstringAppFilterRow.style.opacity = state.hotstringsEnabled ? '1' : '0.45';
+      hotstringAppFilterRow.style.pointerEvents = state.hotstringsEnabled ? 'auto' : 'none';
     }
     if (hotstringDescPreview) {
       hotstringDescPreview.textContent = en
@@ -1038,6 +1130,159 @@
       chip.appendChild(removeBtn);
 
       activeHotkeysList.appendChild(chip);
+    }
+  }
+
+  function normalizeClientAppName(raw) {
+    let val = String(raw || '').trim().replace(/^["']|["']$/g, '');
+    if (!val) return '';
+    const parts = val.split(/[\\/]/).filter(Boolean);
+    val = parts.length > 0 ? parts[parts.length - 1] : val;
+    val = val.trim().toLowerCase();
+    if (!val || /[\r\n\0]/.test(val)) return '';
+    if (!val.includes('.')) {
+      val += '.exe';
+    }
+    return /^[a-z0-9._-]{1,120}$/i.test(val) ? val : '';
+  }
+
+  function renderExcludedApps() {
+    const en = isEn();
+    if (excludedAppsList) {
+      excludedAppsList.innerHTML = '';
+      if (!state.excludedApps || state.excludedApps.length === 0) {
+        const empty = document.createElement('span');
+        empty.className = 'hotkey-empty-hint';
+        empty.textContent = en ? 'No apps excluded' : 'Keine Apps ausgeschlossen';
+        excludedAppsList.appendChild(empty);
+      } else {
+        for (const appName of state.excludedApps) {
+          const chip = document.createElement('span');
+          chip.className = 'hotkey-chip';
+
+          const label = document.createElement('span');
+          label.textContent = appName;
+          chip.appendChild(label);
+
+          const removeBtn = document.createElement('button');
+          removeBtn.type = 'button';
+          removeBtn.className = 'hotkey-chip-remove';
+          removeBtn.title = en ? `Remove ${appName}` : `${appName} entfernen`;
+          removeBtn.textContent = '×';
+          removeBtn.addEventListener('click', () => {
+            sendIPC('removeExcludedApp', { appName });
+          });
+          chip.appendChild(removeBtn);
+
+          excludedAppsList.appendChild(chip);
+        }
+      }
+    }
+
+    if (btnExcludeActiveApp) {
+      const activeApp = state.lastForegroundApp || '';
+      if (activeApp && !state.excludedApps.includes(activeApp)) {
+        btnExcludeActiveApp.style.display = 'inline-flex';
+        btnExcludeActiveApp.textContent = `+ ${activeApp}`;
+        btnExcludeActiveApp.title = en
+          ? `Exclude last active app (${activeApp})`
+          : `Zuletzt aktive App ausschließen (${activeApp})`;
+      } else {
+        btnExcludeActiveApp.style.display = 'none';
+      }
+    }
+  }
+
+  function renderRollingBackups() {
+    const en = isEn();
+    const backups = Array.isArray(state.rollingBackups) ? state.rollingBackups : [];
+    const count = backups.length;
+
+    if (btnToggleBackupsLabel) {
+      btnToggleBackupsLabel.textContent = state.backupsPanelOpen
+        ? en
+          ? `Hide (${count})`
+          : `Ausblenden (${count})`
+        : en
+          ? `Show (${count})`
+          : `Anzeigen (${count})`;
+    }
+
+    if (!rollingBackupsPanel) return;
+    rollingBackupsPanel.classList.toggle('hidden', !state.backupsPanelOpen);
+    rollingBackupsPanel.innerHTML = '';
+
+    if (count === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'backup-empty-hint';
+      empty.textContent = en
+        ? 'No snapshots created yet — SnapPhrase automatically backs up before edits, deletes, or imports.'
+        : 'Noch keine Snapshots vorhanden — SnapPhrase sichert automatisch vor Änderungen, Löschungen oder Importen.';
+      rollingBackupsPanel.appendChild(empty);
+      return;
+    }
+
+    for (const b of backups) {
+      const row = document.createElement('div');
+      row.className = 'backup-item-row';
+
+      const meta = document.createElement('div');
+      meta.className = 'backup-item-meta';
+
+      const dateStr = new Date(b.createdAtMs || Date.now()).toLocaleString(en ? 'en-US' : 'de-DE', {
+        dateStyle: 'medium',
+        timeStyle: 'short',
+      });
+
+      const title = document.createElement('span');
+      title.className = 'backup-item-title';
+      title.textContent = dateStr;
+      meta.appendChild(title);
+
+      const subParts = [];
+      if (b.snippetCount !== null && typeof b.snippetCount === 'number') {
+        subParts.push(
+          en
+            ? `${b.snippetCount} ${b.snippetCount === 1 ? 'snippet' : 'snippets'}`
+            : `${b.snippetCount} ${b.snippetCount === 1 ? 'Baustein' : 'Bausteine'}`
+        );
+      } else {
+        subParts.push(en ? 'Encrypted snapshot' : 'Verschlüsselter Snapshot');
+      }
+      if (b.encrypted) {
+        subParts.push('🔒 AES-256');
+      }
+      if (typeof b.sizeBytes === 'number' && b.sizeBytes > 0) {
+        const kb = Math.max(1, Math.round(b.sizeBytes / 1024));
+        subParts.push(`${kb} KB`);
+      }
+
+      const sub = document.createElement('span');
+      sub.className = 'backup-item-sub';
+      sub.textContent = subParts.join(' · ');
+      meta.appendChild(sub);
+
+      row.appendChild(meta);
+
+      const restoreBtn = document.createElement('button');
+      restoreBtn.type = 'button';
+      restoreBtn.className = 'btn btn-secondary btn-compact-action';
+      restoreBtn.textContent = en ? 'Restore' : 'Wiederherstellen';
+      restoreBtn.addEventListener('click', async () => {
+        const confirmed = await showConfirmDialog({
+          title: en ? 'Restore backup?' : 'Sicherung wiederherstellen?',
+          message: en
+            ? `Restore snapshot from ${dateStr}? Your current settings and master password remain unchanged, and a safety snapshot of the current state is created first.`
+            : `Snapshot vom ${dateStr} wiederherstellen? Deine aktuellen Einstellungen und dein Master-Passwort bleiben erhalten, und der aktuelle Stand wird vorher automatisch gesichert.`,
+          confirmText: en ? 'Restore' : 'Wiederherstellen',
+        });
+        if (confirmed) {
+          sendIPC('restoreBackup', { fileName: b.fileName });
+        }
+      });
+      row.appendChild(restoreBtn);
+
+      rollingBackupsPanel.appendChild(row);
     }
   }
 
@@ -1743,6 +1988,16 @@
         badgesDiv.appendChild(cBadge);
       }
 
+      if (item.richText) {
+        const rBadge = document.createElement('span');
+        rBadge.className = 'rich-tag';
+        rBadge.textContent = 'Rich';
+        rBadge.title = en
+          ? 'Markdown Rich-Text (Ctrl+Shift+Enter to insert as plain text)'
+          : 'Markdown Rich-Text (Strg+Umschalt+Enter für Reintext)';
+        badgesDiv.appendChild(rBadge);
+      }
+
       topRow.appendChild(badgesDiv);
       contentCol.appendChild(topRow);
 
@@ -1841,26 +2096,33 @@
   }
 
   // Snippet Action
-  function handleSnippetAction(item) {
+  function handleSnippetAction(item, options = {}) {
+    if (!item) return;
+    const { forcePlainText = false } = options;
     const rawContent = item.content || '';
     const hasPlaceholders = /\{\?([^}]+)\}/.test(rawContent);
 
     if (hasPlaceholders) {
-      openPromptModal(item);
+      openPromptModal(item, { forcePlainText });
     } else {
       sendIPC('paste', {
         title: item.title,
         text: rawContent,
+        richText: !!item.richText,
+        forcePlainText: !!forcePlainText,
       });
       showToast(isEn() ? '✓ Inserted' : '✓ Eingefügt');
     }
   }
 
-  function handleSnippetCopyOnly(item) {
+  function handleSnippetCopyOnly(item, options = {}) {
     if (!item) return;
+    const { forcePlainText = false } = options;
     sendIPC('copyToClipboardOnly', {
       title: item.title,
       text: item.content || '',
+      richText: !!item.richText,
+      forcePlainText: !!forcePlainText,
     });
   }
 
@@ -1906,9 +2168,10 @@
     return Array.from(fieldMap.values());
   }
 
-  function openPromptModal(item) {
+  function openPromptModal(item, options = {}) {
     const en = isEn();
     state.currentPromptSnippet = item;
+    state.forcePlainTextForPrompt = !!options.forcePlainText;
     promptTitle.textContent = item.title;
     promptFieldsContainer.innerHTML = '';
 
@@ -2007,14 +2270,18 @@
     sendIPC('paste', {
       title: state.currentPromptSnippet.title,
       text,
+      richText: !!state.currentPromptSnippet.richText,
+      forcePlainText: !!state.forcePlainTextForPrompt,
     });
     showToast(isEn() ? '✓ Inserted' : '✓ Eingefügt');
     state.currentPromptSnippet = null;
+    state.forcePlainTextForPrompt = false;
   }
 
   function cancelPrompt() {
     promptModal.classList.remove('active');
     state.currentPromptSnippet = null;
+    state.forcePlainTextForPrompt = false;
     sendIPC('cancelPrompt');
     searchInput.focus();
   }
@@ -2038,6 +2305,9 @@
     const favSvg = ctxFavorite ? ctxFavorite.querySelector('svg') : null;
     if (favSvg) {
       favSvg.setAttribute('fill', item.favorite ? 'currentColor' : 'none');
+    }
+    if (ctxInsertPlain) {
+      ctxInsertPlain.style.display = item.richText ? 'flex' : 'none';
     }
 
     const shellRect = appShell
@@ -2126,6 +2396,16 @@
     });
   }
 
+  if (ctxInsertPlain) {
+    ctxInsertPlain.addEventListener('click', () => {
+      const target = state.contextMenuSnippet;
+      closeContextMenu();
+      if (target) {
+        handleSnippetAction(target, { forcePlainText: true });
+      }
+    });
+  }
+
   ctxCopy.addEventListener('click', () => {
     if (state.contextMenuSnippet) {
       handleSnippetCopyOnly(state.contextMenuSnippet);
@@ -2180,6 +2460,7 @@
       category: editCategory.value,
       content: editContent.value,
       favorite: editFavorite.checked,
+      richText: !!(editRichText && editRichText.checked),
     });
   }
 
@@ -2223,6 +2504,31 @@
     });
   }
 
+  function syncEditRichTextButtonUI() {
+    const isRich = !!(editRichText && editRichText.checked);
+    const en = isEn();
+    if (btnToggleEditRichText) {
+      btnToggleEditRichText.classList.toggle('active', isRich);
+    }
+    if (editRichTextLabel) {
+      editRichTextLabel.textContent = isRich
+        ? en
+          ? 'Rich-Text on'
+          : 'Rich-Text aktiv'
+        : 'Rich-Text';
+    }
+    if (markdownFormatChips) {
+      markdownFormatChips.classList.toggle('hidden', !isRich);
+    }
+  }
+
+  if (btnToggleEditRichText && editRichText) {
+    btnToggleEditRichText.addEventListener('click', () => {
+      editRichText.checked = !editRichText.checked;
+      syncEditRichTextButtonUI();
+    });
+  }
+
   if (editKuerzel) {
     editKuerzel.addEventListener('input', updateEditKuerzelLiveBadge);
   }
@@ -2238,6 +2544,7 @@
       editCategory.value = snippet.category || '';
       editContent.value = snippet.content || '';
       editFavorite.checked = !!snippet.favorite;
+      if (editRichText) editRichText.checked = !!snippet.richText;
       btnDeleteSnippet.style.display = 'inline-flex';
       btnDuplicateFromManager.style.display = 'inline-flex';
     } else {
@@ -2248,11 +2555,13 @@
       editCategory.value = state.activeCategory.startsWith('[') ? '' : state.activeCategory;
       editContent.value = '';
       editFavorite.checked = false;
+      if (editRichText) editRichText.checked = false;
       btnDeleteSnippet.style.display = 'none';
       btnDuplicateFromManager.style.display = 'none';
     }
 
     syncEditFavoriteButtonUI();
+    syncEditRichTextButtonUI();
     updateHotstringUI();
     state.managerInitialSnapshot = captureManagerSnapshot();
     managerModal.classList.add('active');
@@ -2335,10 +2644,60 @@
       category: editCategory.value.trim(),
       content: editContent.value,
       favorite: editFavorite.checked,
+      richText: !!(editRichText && editRichText.checked),
     });
 
     managerModal.classList.remove('active');
     searchInput.focus();
+  });
+
+  // Markdown toolbar actions
+  document.querySelectorAll('.md-format-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      if (!editContent) return;
+      const textarea = editContent;
+      const text = textarea.value;
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+      const selected = text.substring(start, end);
+
+      if (btn.dataset.wrap) {
+        const wrap = btn.dataset.wrap;
+        if (start !== end) {
+          textarea.value = text.substring(0, start) + wrap + selected + wrap + text.substring(end);
+          textarea.focus();
+          textarea.selectionStart = start + wrap.length;
+          textarea.selectionEnd = end + wrap.length;
+        } else {
+          textarea.value = text.substring(0, start) + wrap + wrap + text.substring(end);
+          textarea.focus();
+          textarea.selectionStart = textarea.selectionEnd = start + wrap.length;
+        }
+      } else if (btn.dataset.link) {
+        const inner = selected || (isEn() ? 'Link text' : 'Linktext');
+        const snippet = `[${inner}](https://)`;
+        textarea.value = text.substring(0, start) + snippet + text.substring(end);
+        textarea.focus();
+        if (selected) {
+          textarea.selectionStart = textarea.selectionEnd = start + inner.length + 11;
+        } else {
+          textarea.selectionStart = start + 1;
+          textarea.selectionEnd = start + 1 + inner.length;
+        }
+      } else if (btn.dataset.line) {
+        const prefix = btn.dataset.line;
+        const lineStart = text.lastIndexOf('\n', start - 1) + 1;
+        const lineContent = text.substring(lineStart);
+        if (!lineContent.startsWith(prefix)) {
+          textarea.value = text.substring(0, lineStart) + prefix + text.substring(lineStart);
+          textarea.focus();
+          textarea.selectionStart = start + prefix.length;
+          textarea.selectionEnd = end + prefix.length;
+        } else {
+          textarea.focus();
+        }
+      }
+    });
   });
 
   // Template chips insertion
@@ -2368,6 +2727,8 @@
     syncSegmentedControls();
     updateHotstringUI();
     renderActiveHotkeys();
+    renderExcludedApps();
+    renderRollingBackups();
     updateSecurityButtonsUI();
     renderUpdateUI();
     settingsModal.classList.add('active');
@@ -2535,6 +2896,46 @@
   if (btnImportData) btnImportData.addEventListener('click', () => sendIPC('importDialog'));
   if (btnExportData) btnExportData.addEventListener('click', () => sendIPC('exportDialog'));
   if (btnOpenDataFolder) btnOpenDataFolder.addEventListener('click', () => sendIPC('openDataFolder'));
+
+  if (btnAddExcludedApp && excludedAppInput) {
+    const submitExcludedApp = () => {
+      const appName = normalizeClientAppName(excludedAppInput.value);
+      if (!appName) {
+        showToast(
+          isEn()
+            ? '⚠️ Enter a valid program name (e.g. keepass.exe)'
+            : '⚠️ Gültigen Programmnamen eingeben (z. B. keepass.exe)'
+        );
+        excludedAppInput.focus();
+        return;
+      }
+      excludedAppInput.value = '';
+      sendIPC('addExcludedApp', { appName });
+    };
+    btnAddExcludedApp.addEventListener('click', submitExcludedApp);
+    excludedAppInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        e.stopPropagation();
+        submitExcludedApp();
+      }
+    });
+  }
+
+  if (btnExcludeActiveApp) {
+    btnExcludeActiveApp.addEventListener('click', () => {
+      if (state.lastForegroundApp) {
+        sendIPC('addExcludedApp', { appName: state.lastForegroundApp });
+      }
+    });
+  }
+
+  if (btnToggleBackupsList) {
+    btnToggleBackupsList.addEventListener('click', () => {
+      state.backupsPanelOpen = !state.backupsPanelOpen;
+      renderRollingBackups();
+    });
+  }
 
   if (btnOpenCryptoFromSettings) {
     btnOpenCryptoFromSettings.addEventListener('click', () => {
@@ -3057,6 +3458,11 @@
           (state.selectedIndex - 1 + state.filteredSnippets.length) % state.filteredSnippets.length;
         const wrapped = state.selectedIndex > prev;
         updateCardSelection(!e.repeat && !wrapped);
+      }
+    } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && e.shiftKey) {
+      e.preventDefault();
+      if (state.filteredSnippets.length > 0) {
+        handleSnippetAction(state.filteredSnippets[state.selectedIndex], { forcePlainText: true });
       }
     } else if (e.key === 'Enter' && e.shiftKey) {
       e.preventDefault();
