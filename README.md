@@ -7,7 +7,7 @@
 
 *Dein lokaler, verschlüsselter Satzbaustein-Manager für Windows — 100 % Offline. 0 % Cloud. 0 € Abo.*
 
-[![Version](https://img.shields.io/badge/Version-1.7.1-2563eb?style=for-the-badge)](./package.json)
+[![Version](https://img.shields.io/badge/Version-1.7.2-2563eb?style=for-the-badge)](./package.json)
 [![Platform](https://img.shields.io/badge/Windows-10%20%2F%2011%20(x64)-0078d4?style=for-the-badge&logo=windows)](./package.json)
 [![Privacy](https://img.shields.io/badge/100%25%20Local-Zero%20Cloud-10b981?style=for-the-badge)](./PRIVACY.md)
 [![Encryption](https://img.shields.io/badge/AES--256-PBKDF2%20%2B%20HMAC-8b5cf6?style=for-the-badge)](./src/crypto.js)
@@ -33,7 +33,7 @@ Many modern text expanders force users into **cloud accounts, mandatory sign-ups
 | 🟢 Option 1: Microsoft Store *(Recommended)* | 🔵 Option 2: Direct Download *(Portable & Setup)* |
 | :--- | :--- |
 | **1-Click install without Windows SmartScreen warning**<br>*(Signed by Microsoft + automatic Store updates)* | **No Store login & no admin rights required**<br>*(Ideal for locked-down office PCs or USB drives)* |
-| 👉 **[Open in Microsoft Store](#)** *(Coming soon)* | 👉 **[SnapPhrase-Portable-1.7.1.exe](../../releases/latest)** *(Run directly without installation)*<br>👉 **[SnapPhrase-Setup-1.7.1.exe](../../releases/latest)** *(Classic Windows installer)* |
+| 👉 **[Open in Microsoft Store](#)** *(Coming soon)* | 👉 **[SnapPhrase-Portable-1.7.2.exe](../../releases/latest)** *(Run directly without installation)*<br>👉 **[SnapPhrase-Setup-1.7.2.exe](../../releases/latest)** *(Classic Windows installer)* |
 
 <details>
 <summary>💡 <b>Note on Direct Download (.exe): Why does Windows show a blue SmartScreen prompt on first launch?</b> (Click to expand)</summary>

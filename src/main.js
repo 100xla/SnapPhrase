@@ -1,5 +1,5 @@
 /**
- * SnapPhrase v1.7.1 — Main Process
+ * SnapPhrase v1.7.2 — Main Process
  * Supports:
  * - Centered Spotlight Mode (Apple-inspired floating palette with smooth blurred & dimmed desktop backdrop)
  * - Automatic Bilingual UI & Templates (Auto-detects Windows language DE/EN + manual switch in Settings)
@@ -38,7 +38,7 @@ const { preparePastePayloads } = require('./markdown');
 
 const APP_ID = 'com.snapphrase.app';
 const APP_NAME = 'SnapPhrase';
-const APP_VERSION = '1.7.1';
+const APP_VERSION = '1.7.2';
 const CENTER_WIDTH_STANDARD = 1120;
 const CENTER_HEIGHT_STANDARD = 780;
 const CENTER_WIDTH_COMPACT = 580;
@@ -74,6 +74,9 @@ let isClosingAnimation = false;
 let rendererDataDirty = true;
 let currentBackdropSnapshot = null;
 let simulatedAutostartForTests = false;
+let syncFolderWatcher = null;
+let syncWatchDebounceTimer = null;
+let lastWindowOpenSyncCheckAt = 0;
 
 const hasCustomUserDataArg = process.argv.some((arg) => arg.startsWith('--user-data-dir'));
 const launchedHidden =
@@ -768,6 +771,7 @@ function sendDataToRenderer(options = {}) {
     updateState: updater ? updater.getState() : null,
     insets: ctx.workAreaInsets,
     rollingBackups: storage.isLocked ? [] : storage.listRollingBackups(),
+    syncStatus: storage.getSyncStatus(),
     snippets: storage.isLocked ? [] : storage.getSnippets(),
     categories: storage.isLocked ? [] : storage.getCategories(),
   };
@@ -867,6 +871,17 @@ function showWindow(options = {}) {
   const ctx = syncWindowGeometry(source, targetCtx);
   if (rendererDataDirty) {
     sendDataToRenderer();
+  }
+
+  if (
+    storage.localSyncConfig &&
+    storage.localSyncConfig.folderPath &&
+    Date.now() - lastWindowOpenSyncCheckAt > 15000
+  ) {
+    lastWindowOpenSyncCheckAt = Date.now();
+    setImmediate(() => {
+      performAutoSyncCheck({ silent: true });
+    });
   }
 
   const seq = ++showSequenceCounter;
@@ -1968,6 +1983,37 @@ ipcMain.on('satztresor-msg', (event, data) => {
       break;
     }
 
+    case 'openSyncFolder': {
+      const syncFolder = storage.localSyncConfig && storage.localSyncConfig.folderPath;
+      if (syncFolder && fs.existsSync(syncFolder)) {
+        shell.openPath(syncFolder);
+      }
+      break;
+    }
+
+    case 'chooseSyncFolder': {
+      handleChooseSyncFolder(data);
+      break;
+    }
+
+    case 'syncNow': {
+      performAutoSyncCheck({ silent: false, force: data.force || '' });
+      break;
+    }
+
+    case 'disconnectSyncFolder': {
+      stopSyncWatcher();
+      storage.disconnectSyncFolder();
+      sendDataToRenderer();
+      mainWindow.webContents.send('satztresor-msg', {
+        type: 'showToast',
+        message: isEn()
+          ? '✓ Sync disconnected (local snippets preserved)'
+          : '✓ Synchronisation getrennt (lokale Bausteine bleiben erhalten)',
+      });
+      break;
+    }
+
     case 'restoreBackup': {
       const fileName = String(data.fileName || '').trim();
       if (!fileName) break;
@@ -2134,6 +2180,7 @@ function broadcastUpdateState(nextUpdateState) {
 function prepareQuitForUpdate() {
   isQuitting = true;
   cancelHideAnimation();
+  stopSyncWatcher();
   storage.flushSave();
   win32.stopKeyboardHook();
   win32.removeAllFramelessWindowGuards();
@@ -2155,6 +2202,190 @@ function applyThemeAndBoundsAfterUnlock() {
   syncSystemTheme();
   if (!mainWindow) return;
   syncWindowGeometry();
+}
+
+function stopSyncWatcher() {
+  if (syncWatchDebounceTimer) {
+    clearTimeout(syncWatchDebounceTimer);
+    syncWatchDebounceTimer = null;
+  }
+  if (syncFolderWatcher) {
+    try {
+      syncFolderWatcher.close();
+    } catch (e) {}
+    syncFolderWatcher = null;
+  }
+}
+
+function setupSyncWatcher() {
+  stopSyncWatcher();
+  const folderPath = storage && storage.localSyncConfig && storage.localSyncConfig.folderPath;
+  if (!folderPath) return;
+
+  try {
+    if (!fs.existsSync(folderPath)) return;
+    syncFolderWatcher = fs.watch(folderPath, { persistent: false }, (eventType, filename) => {
+      if (filename && String(filename).toLowerCase() !== 'bausteine.ini') {
+        return;
+      }
+      if (syncWatchDebounceTimer) {
+        clearTimeout(syncWatchDebounceTimer);
+      }
+      syncWatchDebounceTimer = setTimeout(() => {
+        syncWatchDebounceTimer = null;
+        performAutoSyncCheck({ silent: true });
+      }, 1100);
+    });
+    syncFolderWatcher.on('error', () => {
+      stopSyncWatcher();
+    });
+  } catch (e) {
+    stopSyncWatcher();
+  }
+}
+
+function performAutoSyncCheck({ silent = true, force = '' } = {}) {
+  if (!storage || !storage.localSyncConfig || !storage.localSyncConfig.folderPath) {
+    return { status: 'idle', changed: false };
+  }
+
+  const res = storage.syncNow({ force });
+  if (res.changed) {
+    registerHotkeys();
+    restartKeyboardHook();
+    syncSystemTheme();
+    syncNativeBackdrop();
+    syncWindowGeometry();
+    sendDataToRenderer();
+    updateTrayMenu();
+    if (mainWindow && !mainWindow.isDestroyed() && isMainRendererReady) {
+      mainWindow.webContents.send('satztresor-msg', {
+        type: 'showToast',
+        message: isEn()
+          ? '✓ Snippets updated from sync folder'
+          : '✓ Bausteine aus Sync-Ordner aktualisiert',
+      });
+    }
+    return res;
+  }
+
+  if (!silent) {
+    sendDataToRenderer();
+    if (mainWindow && !mainWindow.isDestroyed() && isMainRendererReady) {
+      const ok = res.status === 'ok';
+      mainWindow.webContents.send('satztresor-msg', {
+        type: 'showToast',
+        message: ok
+          ? isEn()
+            ? '✓ Cloud / folder sync up to date'
+            : '✓ Cloud- / Ordner-Sync ist aktuell'
+          : isEn()
+            ? '⚠️ Sync folder unreachable — working locally'
+            : '⚠️ Sync-Ordner momentan nicht erreichbar — arbeite lokal weiter',
+      });
+    }
+  } else if (res.status === 'offline') {
+    markDataDirtyAndSync();
+  }
+
+  return res;
+}
+
+async function handleChooseSyncFolder(data = {}) {
+  const en = isEn();
+  let chosenFolder = String(data.targetFolder || '').trim();
+  const providerId = String(data.providerId || 'custom').trim();
+  const resolutionMode =
+    data.resolutionMode === 'pull' || data.resolutionMode === 'push' ? data.resolutionMode : '';
+
+  if (!chosenFolder) {
+    const parentWin = mainWindow && mainWindow.isVisible() ? mainWindow : undefined;
+    const defaultDir =
+      (storage.localSyncConfig && storage.localSyncConfig.folderPath) || app.getPath('home');
+    const result = await withSystemDialog(() =>
+      dialog.showOpenDialog(parentWin, {
+        title: en
+          ? 'Select Sync Folder (OneDrive, Google Drive, Dropbox, NAS, Network Drive)'
+          : 'Synchronisations-Ordner wählen (OneDrive, Google Drive, Dropbox, NAS, Netzlaufwerk)',
+        defaultPath: defaultDir,
+        properties: ['openDirectory', 'createDirectory'],
+      })
+    );
+    if (!result || result.canceled || !result.filePaths || !result.filePaths[0]) {
+      return;
+    }
+    chosenFolder = result.filePaths[0];
+  }
+
+  if (storage.isSelfStorageFolder(chosenFolder)) {
+    if (mainWindow && !mainWindow.isDestroyed() && isMainRendererReady) {
+      mainWindow.webContents.send('satztresor-msg', {
+        type: 'showAppAlert',
+        title: en ? 'Invalid Sync Folder' : 'Ungültiger Sync-Ordner',
+        message: en
+          ? 'This folder is already SnapPhrase’s local storage directory. Please select a Cloud folder, NAS share, or backup folder.'
+          : 'Dieser Ordner ist bereits das lokale App-Verzeichnis von SnapPhrase. Bitte wähle einen Cloud-Ordner, ein Netzlaufwerk (NAS) oder einen separaten Sicherungsordner.',
+      });
+    }
+    return;
+  }
+
+  if (!resolutionMode) {
+    const inspection = storage.inspectSyncFolder(chosenFolder);
+    if (inspection.valid && inspection.hasExistingRemoteFile && inspection.differsFromLocal) {
+      if (mainWindow && !mainWindow.isDestroyed() && isMainRendererReady) {
+        mainWindow.webContents.send('satztresor-msg', {
+          type: 'promptSyncFolderConflict',
+          folderPath: chosenFolder,
+          providerId,
+          remoteModifiedAt: inspection.remoteModifiedAt || '',
+        });
+      }
+      return;
+    }
+  }
+
+  const res = storage.configureSyncFolder(chosenFolder, {
+    providerId,
+    mode: resolutionMode || 'push',
+  });
+  setupSyncWatcher();
+
+  if (res.changed) {
+    registerHotkeys();
+    restartKeyboardHook();
+    syncSystemTheme();
+    syncNativeBackdrop();
+    syncWindowGeometry();
+    updateTrayMenu();
+  }
+  sendDataToRenderer();
+
+  if (mainWindow && !mainWindow.isDestroyed() && isMainRendererReady) {
+    if (res.success) {
+      mainWindow.webContents.send('satztresor-msg', {
+        type: 'showToast',
+        message:
+          res.action === 'pulled'
+            ? en
+              ? '✓ Sync enabled & existing snippets loaded'
+              : '✓ Synchronisation aktiviert & vorhandene Bausteine geladen'
+            : en
+              ? '✓ Cloud / folder sync enabled'
+              : '✓ Cloud- / Ordner-Synchronisation aktiviert',
+      });
+    } else {
+      mainWindow.webContents.send('satztresor-msg', {
+        type: 'showAppAlert',
+        title: en ? 'Sync Folder Error' : 'Sync-Ordner Fehler',
+        message:
+          res.error ||
+          (en
+            ? 'Could not write to the selected sync folder.'
+            : 'In den ausgewählten Synchronisations-Ordner konnte nicht geschrieben werden.'),
+      });
+    }
+  }
 }
 
 function lockVaultOnSystemIdle() {
@@ -2193,11 +2424,16 @@ app.whenReady().then(() => {
   setupTray();
   registerHotkeys();
   restartKeyboardHook();
+  setupSyncWatcher();
   updater.startSchedule();
 
   if (powerMonitor && typeof powerMonitor.on === 'function') {
     powerMonitor.on('lock-screen', lockVaultOnSystemIdle);
     powerMonitor.on('suspend', lockVaultOnSystemIdle);
+    powerMonitor.on('resume', () => {
+      performAutoSyncCheck({ silent: true });
+      setupSyncWatcher();
+    });
   }
 
   const handleDisplayChange = () => {
@@ -2232,6 +2468,7 @@ app.on('will-quit', () => {
   if (updater) {
     updater.stopSchedule();
   }
+  stopSyncWatcher();
   storage.flushSave();
   win32.stopKeyboardHook();
   win32.removeAllFramelessWindowGuards();

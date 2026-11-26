@@ -94,7 +94,7 @@
           <path d="M13 7l-3 5h4l-3 5"/>
         </svg>
         <span id="brandNameLabel">SnapPhrase</span>
-        <span id="versionTag" class="version-pill">v1.7.1</span>
+        <span id="versionTag" class="version-pill">v1.7.2</span>
       </div>
       <button id="updateReadyPill" class="update-ready-pill" style="display: none;" title="Update jetzt installieren und neu starten">
         <span class="update-dot"></span>
@@ -454,6 +454,46 @@
               </div>
             </div>
 
+            <div class="settings-row settings-row-stackable" id="cloudSyncRow">
+              <div class="settings-row-inline">
+                <div class="settings-label-group">
+                  <div class="sync-title-row">
+                    <span class="settings-title" id="settingSyncTitle">Cloud- &amp; Ordner-Sync</span>
+                    <span id="syncLiveBadge" class="sync-status-pill">Aus</span>
+                  </div>
+                  <span class="settings-desc" id="settingSyncDesc">Lokalen Tresor automatisch mit OneDrive, Google Drive, Dropbox, iCloud, Nextcloud oder NAS spiegeln</span>
+                </div>
+                <div class="settings-actions-inline" id="syncActionsBar">
+                  <button type="button" id="btnChooseSyncFolder" class="btn btn-secondary btn-compact-action">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"></path>
+                    </svg>
+                    <span id="btnChooseSyncFolderLabel">Ordner wählen…</span>
+                  </button>
+                  <button type="button" id="btnSyncNow" class="btn btn-secondary btn-compact-action" style="display: none;">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+                      <polyline points="23 4 23 10 17 10"></polyline>
+                      <polyline points="1 20 1 14 7 14"></polyline>
+                      <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                    </svg>
+                    <span id="btnSyncNowLabel">Sync</span>
+                  </button>
+                  <button type="button" id="btnOpenSyncFolder" class="btn-icon-subtle" style="display: none;" title="Sync-Ordner im Explorer öffnen">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                    </svg>
+                  </button>
+                  <button type="button" id="btnDisconnectSync" class="btn-icon-subtle sync-disconnect-btn" style="display: none;" title="Synchronisation trennen">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <line x1="18" y1="6" x2="6" y2="18"></line>
+                      <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+              <div id="syncProvidersBar" class="sync-providers-bar hidden"></div>
+            </div>
+
             <div class="settings-row">
               <div class="settings-label-group">
                 <span class="settings-title" id="settingCryptoTitle">Passwortschutz (AES-256)</span>
@@ -497,7 +537,7 @@
           <div class="settings-card">
             <div class="settings-row">
               <div class="settings-label-group" style="flex: 1; min-width: 0;">
-                <span class="settings-title" id="updateStatusHeadline">SnapPhrase v1.7.1</span>
+                <span class="settings-title" id="updateStatusHeadline">SnapPhrase v1.7.2</span>
                 <span class="settings-desc" id="updateStatusDesc">Automatische Hintergrund-Updates bereit</span>
                 <div id="updateProgressWrap" class="update-progress-wrap" style="display: none;">
                   <div id="updateProgressBar" class="update-progress-bar" style="width: 0%;"></div>

@@ -1,5 +1,5 @@
 /**
- * SnapPhrase v1.7.1 — Markdown & Rich-Text Clipboard Formatter
+ * SnapPhrase v1.7.2 — Markdown & Rich-Text Clipboard Formatter
  */
 
 const CURSOR_SENTINEL = '\uE000SNAPCURSOR\uE000';

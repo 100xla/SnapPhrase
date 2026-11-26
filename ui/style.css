@@ -1,5 +1,5 @@
 /**
- * SnapPhrase v1.7.1 — Apple-Inspired Spotlight & Frosted Glass Stylesheet
+ * SnapPhrase v1.7.2 — Apple-Inspired Spotlight & Frosted Glass Stylesheet
  * Supports Dark & Light mode, Fullscreen Blurred & Dimmed Focus Backdrop,
  * Centered Spotlight layout, Softwareupdate UI, Modals, and Context Menu.
  */
@@ -1892,6 +1892,107 @@ html.light .backup-item-row {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+.sync-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.sync-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1.5px 7px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-dim);
+}
+
+html.light .sync-status-pill {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.sync-status-pill.active {
+  background: rgba(48, 209, 88, 0.14);
+  border-color: rgba(48, 209, 88, 0.35);
+  color: #30d158;
+}
+
+html.light .sync-status-pill.active {
+  background: rgba(36, 138, 61, 0.12);
+  border-color: rgba(36, 138, 61, 0.32);
+  color: #1e7e34;
+}
+
+.sync-status-pill.offline {
+  background: rgba(255, 159, 10, 0.15);
+  border-color: rgba(255, 159, 10, 0.4);
+  color: #ffb340;
+}
+
+html.light .sync-status-pill.offline {
+  background: rgba(217, 119, 6, 0.11);
+  border-color: rgba(217, 119, 6, 0.35);
+  color: #b45309;
+}
+
+.sync-providers-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  width: 100%;
+  padding-top: 2px;
+}
+
+.sync-providers-bar.hidden {
+  display: none;
+}
+
+.sync-providers-hint {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-right: 2px;
+}
+
+.sync-provider-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 7px;
+  font-size: 11.5px;
+  font-weight: 550;
+  color: var(--text-sec);
+  background: var(--input-bg);
+  border: 1px solid var(--border-subtle);
+  cursor: pointer;
+  transition: background 0.14s ease, border-color 0.14s ease, color 0.14s ease;
+}
+
+.sync-provider-chip:hover {
+  background: var(--card-hover);
+  color: var(--text-main);
+  border-color: rgba(10, 132, 255, 0.35);
+}
+
+.sync-provider-chip.active {
+  background: rgba(10, 132, 255, 0.15);
+  border-color: rgba(10, 132, 255, 0.45);
+  color: var(--accent);
+}
+
+.sync-disconnect-btn:hover {
+  color: #ff453a;
+  border-color: rgba(255, 69, 58, 0.35);
+  background: rgba(255, 69, 58, 0.1);
+}
+
 
 .backup-empty-hint {
   font-size: 12px;

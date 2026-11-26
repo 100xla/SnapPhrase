@@ -1,11 +1,12 @@
 /**
- * SnapPhrase v1.7.1 — Storage & INI Database Engine
+ * SnapPhrase v1.7.2 — Storage & INI Database Engine
  * Handles atomic file operations, smart hash-verified rolling backups, INI serialization,
  * AES-256-CBC database encryption (lock & password change), JSON/CSV/INI import/export,
  * debounced usage persistence, and application settings.
  */
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const AES256 = require('./crypto');
@@ -167,6 +168,113 @@ class Storage {
     this._saveTimer = null;
     this._lastRollingBackupAt = 0;
     this._enforceStartupCenterPending = true;
+    this._suppressSyncPush = false;
+    this.localSyncConfig = {
+      folderPath: '',
+      providerId: '',
+      lastSyncedHash: '',
+      lastSyncedAt: '',
+      lastSyncStatus: 'idle',
+      lastSyncError: '',
+    };
+  }
+
+  static detectCloudProviders() {
+    if (
+      process.env.SNAPPHRASE_MOCK_CLOUD_PROVIDERS &&
+      process.env.SNAPPHRASE_MOCK_CLOUD_PROVIDERS.trim()
+    ) {
+      try {
+        const mocked = JSON.parse(process.env.SNAPPHRASE_MOCK_CLOUD_PROVIDERS);
+        if (Array.isArray(mocked)) return mocked;
+      } catch (e) {}
+    }
+
+    const home = os.homedir();
+    const candidates = [];
+    const seenRoots = new Set();
+
+    const addProvider = (id, name, rootDir) => {
+      if (!rootDir || typeof rootDir !== 'string') return;
+      const cleanRoot = path.resolve(rootDir.trim());
+      const normKey = cleanRoot.toLowerCase();
+      if (seenRoots.has(normKey)) return;
+      try {
+        if (fs.existsSync(cleanRoot) && fs.statSync(cleanRoot).isDirectory()) {
+          seenRoots.add(normKey);
+          candidates.push({
+            id,
+            name,
+            rootPath: cleanRoot,
+            targetFolder: path.join(cleanRoot, 'SnapPhrase'),
+          });
+        }
+      } catch (e) {}
+    };
+
+    // 1. OneDrive
+    const oneDrivePaths = [
+      process.env.OneDriveConsumer,
+      process.env.OneDrive,
+      process.env.OneDriveCommercial,
+      path.join(home, 'OneDrive'),
+    ];
+    for (const p of oneDrivePaths) {
+      if (p) {
+        addProvider('onedrive', 'OneDrive', p);
+        break;
+      }
+    }
+
+    // 2. Google Drive
+    const gDrivePaths = [
+      path.join(home, 'Google Drive'),
+      path.join(home, 'My Drive'),
+      path.join(home, 'Meine Ablage'),
+      'G:\\My Drive',
+      'G:\\Meine Ablage',
+    ];
+    for (const p of gDrivePaths) {
+      if (fs.existsSync(p)) {
+        addProvider('gdrive', 'Google Drive', p);
+        break;
+      }
+    }
+
+    // 3. Dropbox (via info.json or default folder)
+    let dropboxAdded = false;
+    const dropboxInfos = [
+      process.env.APPDATA ? path.join(process.env.APPDATA, 'Dropbox', 'info.json') : '',
+      process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Dropbox', 'info.json') : '',
+    ].filter(Boolean);
+    for (const infoPath of dropboxInfos) {
+      try {
+        if (fs.existsSync(infoPath)) {
+          const parsed = JSON.parse(fs.readFileSync(infoPath, 'utf8'));
+          const dbPath =
+            (parsed.personal && parsed.personal.path) ||
+            (parsed.business && parsed.business.path) ||
+            '';
+          if (dbPath && fs.existsSync(dbPath)) {
+            addProvider('dropbox', 'Dropbox', dbPath);
+            dropboxAdded = true;
+            break;
+          }
+        }
+      } catch (e) {}
+    }
+    if (!dropboxAdded) {
+      addProvider('dropbox', 'Dropbox', path.join(home, 'Dropbox'));
+    }
+
+    // 4. iCloud Drive
+    addProvider('icloud', 'iCloud Drive', path.join(home, 'iCloudDrive'));
+
+    // 5. Nextcloud & ownCloud
+    addProvider('nextcloud', 'Nextcloud', path.join(home, 'Nextcloud'));
+    addProvider('owncloud', 'ownCloud', path.join(home, 'ownCloud'));
+
+    return candidates;
   }
 
   _loadPersistedUiPrefs() {
@@ -185,6 +293,21 @@ class Storage {
           this.cachedSettings.set(key, parsed[key]);
         }
       }
+      if (typeof parsed.SyncFolderPath === 'string') {
+        this.localSyncConfig.folderPath = parsed.SyncFolderPath.trim();
+      }
+      if (typeof parsed.SyncProviderId === 'string') {
+        this.localSyncConfig.providerId = parsed.SyncProviderId.trim();
+      }
+      if (typeof parsed.SyncLastHash === 'string') {
+        this.localSyncConfig.lastSyncedHash = parsed.SyncLastHash.trim();
+      }
+      if (typeof parsed.SyncLastTimestamp === 'string') {
+        this.localSyncConfig.lastSyncedAt = parsed.SyncLastTimestamp.trim();
+      }
+      if (this.localSyncConfig.folderPath) {
+        this.localSyncConfig.lastSyncStatus = 'ok';
+      }
     } catch (e) {}
   }
 
@@ -198,6 +321,10 @@ class Storage {
           out[key] = String(val);
         }
       }
+      out.SyncFolderPath = this.localSyncConfig.folderPath || '';
+      out.SyncProviderId = this.localSyncConfig.providerId || '';
+      out.SyncLastHash = this.localSyncConfig.lastSyncedHash || '';
+      out.SyncLastTimestamp = this.localSyncConfig.lastSyncedAt || '';
       const parentDir = path.dirname(this.uiPrefsPath);
       if (!fs.existsSync(parentDir)) {
         fs.mkdirSync(parentDir, { recursive: true });
@@ -296,6 +423,12 @@ class Storage {
       if (this._applyStartupCenterLayout()) {
         this.save();
       }
+    }
+
+    if (this.localSyncConfig.folderPath) {
+      try {
+        this.syncNow();
+      } catch (e) {}
     }
   }
 
@@ -841,13 +974,15 @@ class Storage {
     if (this._saveTimer) {
       clearTimeout(this._saveTimer);
       this._saveTimer = null;
-      this.save();
+      this.save({ syncMirrorImmediately: true });
     } else if (this._asyncSavePending) {
-      this.save();
+      this.save({ syncMirrorImmediately: true });
+    } else if (this._pendingSyncMirrorContent) {
+      this._mirrorToSyncFolderSync(this._pendingSyncMirrorContent);
     }
   }
 
-  _writeContentAtomically(fileContent) {
+  _writeContentAtomically(fileContent, options = {}) {
     const parentDir = path.dirname(this.filePath);
     if (!fs.existsSync(parentDir)) {
       try {
@@ -871,6 +1006,381 @@ class Storage {
       try {
         if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
       } catch (e) {}
+      return;
+    }
+
+    if (!this._suppressSyncPush && !this.inMemoryOnly && this.localSyncConfig.folderPath) {
+      if (options.syncMirrorImmediately) {
+        this._mirrorToSyncFolderSync(fileContent);
+      } else {
+        this._mirrorToSyncFolderAsync(fileContent);
+      }
+    }
+  }
+
+  getSyncFilePath(customFolder = '') {
+    const folder = String(customFolder || this.localSyncConfig.folderPath || '').trim();
+    if (!folder) return '';
+    return path.join(folder, 'bausteine.ini');
+  }
+
+  isSelfStorageFolder(targetFolder) {
+    if (!targetFolder || !this.filePath) return false;
+    try {
+      const a = path.resolve(String(targetFolder).trim()).toLowerCase();
+      const b = path.resolve(path.dirname(this.filePath)).toLowerCase();
+      return a === b;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  getSyncStatus() {
+    const folderPath = this.localSyncConfig.folderPath || '';
+    const syncFilePath = folderPath ? path.join(folderPath, 'bausteine.ini') : '';
+    let reachable = false;
+    if (folderPath) {
+      try {
+        reachable = fs.existsSync(folderPath);
+      } catch (e) {
+        reachable = false;
+      }
+    }
+    return {
+      enabled: Boolean(folderPath),
+      folderPath,
+      syncFilePath,
+      providerId: this.localSyncConfig.providerId || (folderPath ? 'custom' : ''),
+      lastSyncedHash: this.localSyncConfig.lastSyncedHash || '',
+      lastSyncedAt: this.localSyncConfig.lastSyncedAt || '',
+      status: !folderPath
+        ? 'idle'
+        : !reachable && this.localSyncConfig.lastSyncStatus === 'offline'
+          ? 'offline'
+          : this.localSyncConfig.lastSyncStatus || 'ok',
+      error: this.localSyncConfig.lastSyncError || '',
+      detectedProviders: Storage.detectCloudProviders(),
+    };
+  }
+
+  inspectSyncFolder(targetFolder) {
+    const cleanFolder = String(targetFolder || '').trim();
+    if (!cleanFolder) return { valid: false, reason: 'empty' };
+    if (this.isSelfStorageFolder(cleanFolder)) {
+      return { valid: false, reason: 'self-folder' };
+    }
+
+    const remoteFile = path.join(cleanFolder, 'bausteine.ini');
+    try {
+      if (!fs.existsSync(remoteFile)) {
+        return { valid: true, hasExistingRemoteFile: false, differsFromLocal: false };
+      }
+      const remoteRaw = fs.readFileSync(remoteFile, 'utf8');
+      if (!remoteRaw || remoteRaw.trim().length < 5) {
+        return { valid: true, hasExistingRemoteFile: false, differsFromLocal: false };
+      }
+      const remoteHash = hashBufferOrString(remoteRaw);
+      const localRaw = fs.existsSync(this.filePath) ? fs.readFileSync(this.filePath, 'utf8') : '';
+      const localHash = localRaw ? hashBufferOrString(localRaw) : '';
+      const stat = fs.statSync(remoteFile);
+      return {
+        valid: true,
+        hasExistingRemoteFile: true,
+        differsFromLocal: remoteHash !== localHash,
+        remoteModifiedAt: stat.mtime ? stat.mtime.toISOString() : '',
+      };
+    } catch (err) {
+      return { valid: false, reason: 'unreachable', error: err.message };
+    }
+  }
+
+  configureSyncFolder(targetFolder, options = {}) {
+    const cleanFolder = String(targetFolder || '').trim();
+    if (!cleanFolder) {
+      return this.disconnectSyncFolder();
+    }
+    if (this.isSelfStorageFolder(cleanFolder)) {
+      return { success: false, error: 'self-folder' };
+    }
+
+    const resolvedFolder = path.resolve(cleanFolder);
+    const providerId = String(options.providerId || 'custom').trim();
+    const initialMode = options.mode === 'pull' ? 'pull' : 'push';
+
+    try {
+      if (!fs.existsSync(resolvedFolder)) {
+        fs.mkdirSync(resolvedFolder, { recursive: true });
+      }
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+
+    this.localSyncConfig.folderPath = resolvedFolder;
+    this.localSyncConfig.providerId = providerId;
+    this.localSyncConfig.lastSyncError = '';
+
+    const syncResult = this.syncNow({ force: initialMode });
+    this._writePersistedUiPrefs();
+    return {
+      success: syncResult.status === 'ok',
+      ...syncResult,
+      syncStatus: this.getSyncStatus(),
+    };
+  }
+
+  disconnectSyncFolder() {
+    this._pendingSyncMirrorContent = null;
+    this.localSyncConfig.folderPath = '';
+    this.localSyncConfig.providerId = '';
+    this.localSyncConfig.lastSyncedHash = '';
+    this.localSyncConfig.lastSyncedAt = '';
+    this.localSyncConfig.lastSyncStatus = 'idle';
+    this.localSyncConfig.lastSyncError = '';
+    this._writePersistedUiPrefs();
+    return {
+      success: true,
+      status: 'idle',
+      changed: false,
+      syncStatus: this.getSyncStatus(),
+    };
+  }
+
+  _mirrorToSyncFolderSync(fileContent) {
+    const folderPath = this.localSyncConfig.folderPath;
+    if (!folderPath || this.inMemoryOnly) return false;
+    this._pendingSyncMirrorContent = null;
+
+    try {
+      if (!fs.existsSync(folderPath)) {
+        fs.mkdirSync(folderPath, { recursive: true });
+      }
+      const syncFilePath = path.join(folderPath, 'bausteine.ini');
+      const tmpSyncPath = `${syncFilePath}.${process.pid}.${Date.now()}.tmp`;
+      try {
+        fs.writeFileSync(tmpSyncPath, fileContent, 'utf8');
+        try {
+          fs.renameSync(tmpSyncPath, syncFilePath);
+        } catch (renameErr) {
+          fs.writeFileSync(syncFilePath, fileContent, 'utf8');
+          try {
+            if (fs.existsSync(tmpSyncPath)) fs.unlinkSync(tmpSyncPath);
+          } catch (e) {}
+        }
+      } finally {
+        try {
+          if (fs.existsSync(tmpSyncPath)) fs.unlinkSync(tmpSyncPath);
+        } catch (e) {}
+      }
+
+      const contentHash = hashBufferOrString(fileContent);
+      this.localSyncConfig.lastSyncedHash = contentHash;
+      this.localSyncConfig.lastSyncedAt = new Date().toISOString();
+      this.localSyncConfig.lastSyncStatus = 'ok';
+      this.localSyncConfig.lastSyncError = '';
+      this._writePersistedUiPrefs();
+      return true;
+    } catch (err) {
+      this.localSyncConfig.lastSyncStatus = 'offline';
+      this.localSyncConfig.lastSyncError = err.message;
+      return false;
+    }
+  }
+
+  async _mirrorToSyncFolderAsync(fileContent) {
+    const folderPath = this.localSyncConfig.folderPath;
+    if (!folderPath || this.inMemoryOnly) return false;
+    this._pendingSyncMirrorContent = fileContent;
+
+    try {
+      await fs.promises.mkdir(folderPath, { recursive: true });
+      const syncFilePath = path.join(folderPath, 'bausteine.ini');
+      const tmpSyncPath = `${syncFilePath}.${process.pid}.${Date.now()}.tmp`;
+      try {
+        await fs.promises.writeFile(tmpSyncPath, fileContent, 'utf8');
+        try {
+          await fs.promises.rename(tmpSyncPath, syncFilePath);
+        } catch (renameErr) {
+          await fs.promises.writeFile(syncFilePath, fileContent, 'utf8');
+          try {
+            await fs.promises.unlink(tmpSyncPath);
+          } catch (e) {}
+        }
+      } finally {
+        try {
+          await fs.promises.unlink(tmpSyncPath);
+        } catch (e) {}
+      }
+
+      if (this._pendingSyncMirrorContent === fileContent) {
+        this._pendingSyncMirrorContent = null;
+      }
+      const contentHash = hashBufferOrString(fileContent);
+      this.localSyncConfig.lastSyncedHash = contentHash;
+      this.localSyncConfig.lastSyncedAt = new Date().toISOString();
+      this.localSyncConfig.lastSyncStatus = 'ok';
+      this.localSyncConfig.lastSyncError = '';
+      this._writePersistedUiPrefs();
+      return true;
+    } catch (err) {
+      this.localSyncConfig.lastSyncStatus = 'offline';
+      this.localSyncConfig.lastSyncError = err.message;
+      return false;
+    }
+  }
+
+  _applyPulledRawContent(remoteRaw) {
+    // 1. Always create a local rolling backup before applying an external sync payload
+    this.createRollingBackup();
+
+    // 2. Write atomically to local vault without triggering a re-push loop
+    this._suppressSyncPush = true;
+    try {
+      this._writeContentAtomically(remoteRaw);
+    } finally {
+      this._suppressSyncPush = false;
+    }
+
+    // 3. Reload in-memory state seamlessly
+    const isV2 =
+      remoteRaw.startsWith('SPENC2:') ||
+      remoteRaw.startsWith('STENC2:') ||
+      remoteRaw.startsWith('QTENC2:') ||
+      remoteRaw.startsWith('TSENC2:');
+    const isV1 =
+      !isV2 &&
+      (remoteRaw.startsWith('SPENC:') ||
+        remoteRaw.startsWith('STENC:') ||
+        remoteRaw.startsWith('QTENC:') ||
+        remoteRaw.startsWith('TSENC:'));
+
+    if (isV2 || isV1) {
+      const ver = isV2 ? 2 : 1;
+      const cipher = remoteRaw.substring(ver === 2 ? 7 : 6).trim();
+      this.isEncrypted = true;
+      this.encryptionVersion = ver;
+      this.rawCipher = cipher;
+
+      if (!this.isLocked && this.masterPassword) {
+        try {
+          const decrypted = AES256.decrypt(cipher, this.masterPassword, ver);
+          const prefixes = [
+            'SnapPhraseVerifiedMasterKey:',
+            'SatzTresorVerifiedMasterKey:',
+            'QuickTabVerifiedMasterKey:',
+            'TabsmartVerifiedMasterKey:',
+          ];
+          const matchedPrefix = prefixes.find((p) => decrypted.startsWith(p));
+          if (matchedPrefix) {
+            this.parseIni(decrypted.substring(matchedPrefix.length));
+            this._syncCachedSettings();
+            this.isLocked = false;
+            return;
+          }
+        } catch (e) {}
+      }
+
+      // Vault is encrypted and either was already locked or uses a different password
+      this.isLocked = true;
+      this.masterPassword = '';
+      this.data.clear();
+    } else {
+      this.isEncrypted = false;
+      this.isLocked = false;
+      this.rawCipher = null;
+      this.masterPassword = '';
+      this.parseIni(remoteRaw);
+      this._syncCachedSettings();
+    }
+  }
+
+  syncNow(options = {}) {
+    const folderPath = this.localSyncConfig.folderPath;
+    if (!folderPath || this.inMemoryOnly) {
+      return { status: 'idle', action: 'none', changed: false };
+    }
+
+    this.flushSave();
+
+    const syncFilePath = path.join(folderPath, 'bausteine.ini');
+    const forceMode = options.force === 'pull' ? 'pull' : options.force === 'push' ? 'push' : '';
+
+    try {
+      const localExists = fs.existsSync(this.filePath);
+      const localRaw = localExists ? fs.readFileSync(this.filePath, 'utf8') : '';
+      const localHash = localRaw ? hashBufferOrString(localRaw) : '';
+
+      if (!fs.existsSync(syncFilePath)) {
+        if (!localRaw) {
+          return { status: 'ok', action: 'none', changed: false };
+        }
+        const ok = this._mirrorToSyncFolderSync(localRaw);
+        return {
+          status: ok ? 'ok' : 'offline',
+          action: ok ? 'pushed' : 'offline',
+          changed: false,
+        };
+      }
+
+      const remoteRaw = fs.readFileSync(syncFilePath, 'utf8');
+      if (!remoteRaw || remoteRaw.trim().length < 5) {
+        // Ignore transient empty write by external sync client
+        return { status: 'ok', action: 'ignored-transient', changed: false };
+      }
+      const remoteHash = hashBufferOrString(remoteRaw);
+
+      if (remoteHash === localHash) {
+        this.localSyncConfig.lastSyncedHash = remoteHash;
+        if (!this.localSyncConfig.lastSyncedAt) {
+          this.localSyncConfig.lastSyncedAt = new Date().toISOString();
+        }
+        this.localSyncConfig.lastSyncStatus = 'ok';
+        this.localSyncConfig.lastSyncError = '';
+        this._writePersistedUiPrefs();
+        return { status: 'ok', action: 'in-sync', changed: false };
+      }
+
+      let decision = '';
+      if (forceMode === 'pull') {
+        decision = 'pull';
+      } else if (forceMode === 'push') {
+        decision = 'push';
+      } else if (this.localSyncConfig.lastSyncedHash) {
+        if (localHash === this.localSyncConfig.lastSyncedHash) {
+          // Local unchanged since last sync, remote changed -> Pull!
+          decision = 'pull';
+        } else if (remoteHash === this.localSyncConfig.lastSyncedHash) {
+          // Remote unchanged since last sync, local changed -> Push!
+          decision = 'push';
+        }
+      }
+
+      if (!decision) {
+        // Both modified independently (or no prior sync baseline) -> compare mtimeMs
+        const remoteStat = fs.statSync(syncFilePath);
+        const localStat = localExists ? fs.statSync(this.filePath) : { mtimeMs: 0 };
+        decision = remoteStat.mtimeMs > localStat.mtimeMs + 250 ? 'pull' : 'push';
+      }
+
+      if (decision === 'pull') {
+        this._applyPulledRawContent(remoteRaw);
+        this.localSyncConfig.lastSyncedHash = remoteHash;
+        this.localSyncConfig.lastSyncedAt = new Date().toISOString();
+        this.localSyncConfig.lastSyncStatus = 'ok';
+        this.localSyncConfig.lastSyncError = '';
+        this._writePersistedUiPrefs();
+        return { status: 'ok', action: 'pulled', changed: true };
+      }
+
+      const pushedOk = this._mirrorToSyncFolderSync(localRaw);
+      return {
+        status: pushedOk ? 'ok' : 'offline',
+        action: pushedOk ? 'pushed' : 'offline',
+        changed: false,
+      };
+    } catch (err) {
+      this.localSyncConfig.lastSyncStatus = 'offline';
+      this.localSyncConfig.lastSyncError = err.message;
+      return { status: 'offline', action: 'error', changed: false, error: err.message };
     }
   }
 
@@ -906,7 +1416,7 @@ class Storage {
     }
   }
 
-  save() {
+  save(options = {}) {
     if (this.isLocked || this.inMemoryOnly) return;
     if (this._saveTimer) {
       clearTimeout(this._saveTimer);
@@ -925,7 +1435,7 @@ class Storage {
       this.rawCipher = cipher;
     }
 
-    this._writeContentAtomically(fileContent);
+    this._writeContentAtomically(fileContent, options);
   }
 
   isReservedSection(name) {

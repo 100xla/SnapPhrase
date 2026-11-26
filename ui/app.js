@@ -1,5 +1,5 @@
 /**
- * SnapPhrase v1.7.1 — Renderer Application Logic
+ * SnapPhrase v1.7.2 — Renderer Application Logic
  * Apple-inspired Spotlight UI with token search, smart template prompts, hotstring configuration,
  * automatic DE/EN localization, background software updates, non-blocking confirmation modals,
  * custom context menu, favorites, and encryption management.
@@ -16,7 +16,7 @@
   }
 
   const state = {
-    version: '1.7.1',
+    version: '1.7.2',
     language: 'auto', // 'auto' | 'de' | 'en'
     effectiveLanguage: detectBrowserLanguage(), // 'de' | 'en'
     isWindowsStore: false,
@@ -53,6 +53,7 @@
     cryptoMode: 'encrypt', // 'encrypt' | 'change' | 'remove'
     managerInitialSnapshot: null,
     updateState: null,
+    syncStatus: null,
   };
 
   function isEn() {
@@ -147,6 +148,15 @@
   const btnImportData = document.getElementById('btnImportData');
   const btnExportData = document.getElementById('btnExportData');
   const btnOpenDataFolder = document.getElementById('btnOpenDataFolder');
+  const settingSyncDesc = document.getElementById('settingSyncDesc');
+  const syncLiveBadge = document.getElementById('syncLiveBadge');
+  const btnChooseSyncFolder = document.getElementById('btnChooseSyncFolder');
+  const btnChooseSyncFolderLabel = document.getElementById('btnChooseSyncFolderLabel');
+  const btnSyncNow = document.getElementById('btnSyncNow');
+  const btnSyncNowLabel = document.getElementById('btnSyncNowLabel');
+  const btnOpenSyncFolder = document.getElementById('btnOpenSyncFolder');
+  const btnDisconnectSync = document.getElementById('btnDisconnectSync');
+  const syncProvidersBar = document.getElementById('syncProvidersBar');
   const cryptoSettingsStatusDesc = document.getElementById('cryptoSettingsStatusDesc');
   const cryptoSettingsBtnLabel = document.getElementById('cryptoSettingsBtnLabel');
   const btnOpenCryptoFromSettings = document.getElementById('btnOpenCryptoFromSettings');
@@ -513,6 +523,18 @@
         ? 'Open local storage folder in Explorer'
         : 'Lokalen Speicherordner im Explorer öffnen';
     }
+    setTextById('settingSyncTitle', en ? 'Cloud & Folder Sync' : 'Cloud- & Ordner-Sync');
+    setTextById('btnSyncNowLabel', 'Sync');
+    if (btnOpenSyncFolder) {
+      btnOpenSyncFolder.title = en
+        ? 'Open sync folder in Explorer'
+        : 'Sync-Ordner im Explorer öffnen';
+    }
+    if (btnDisconnectSync) {
+      btnDisconnectSync.title = en
+        ? 'Disconnect folder sync (keeps local snippets)'
+        : 'Synchronisation trennen (lokale Bausteine bleiben erhalten)';
+    }
     setTextById('settingCryptoTitle', en ? 'Password Protection (AES-256)' : 'Passwortschutz (AES-256)');
     setTextById('btnLockFromSettingsLabel', en ? 'Lock' : 'Sperren');
     setTextById('settingBackupsTitle', en ? 'Automatic Rolling Backups' : 'Automatische Sicherungen');
@@ -584,6 +606,7 @@
     renderActiveHotkeys();
     renderExcludedApps();
     renderRollingBackups();
+    renderSyncUI();
     renderUpdateUI();
     renderedCategoriesKey = '';
     lastRenderedListKey = '';
@@ -755,6 +778,9 @@
         if (Array.isArray(data.rollingBackups)) {
           state.rollingBackups = data.rollingBackups;
         }
+        if (data.syncStatus) {
+          state.syncStatus = data.syncStatus;
+        }
         if (typeof data.doubleTapCtrlEnabled !== 'undefined') {
           state.doubleTapCtrlEnabled = !!data.doubleTapCtrlEnabled;
           if (settingDoubleTapCtrl) settingDoubleTapCtrl.checked = state.doubleTapCtrlEnabled;
@@ -783,6 +809,7 @@
           renderActiveHotkeys();
           renderExcludedApps();
           renderRollingBackups();
+          renderSyncUI();
           filterAndRender();
         }
         break;
@@ -991,6 +1018,31 @@
           showCancel: false,
         });
         break;
+
+      case 'promptSyncFolderConflict': {
+        const en = isEn();
+        const folderPath = data.folderPath || '';
+        const providerId = data.providerId || 'custom';
+        showConfirmDialog({
+          title: en
+            ? 'Existing Snippets Found in Sync Folder'
+            : 'Bereits Bausteine im Sync-Ordner gefunden',
+          message: en
+            ? `The folder "${folderPath}" already contains a bausteine.ini file.\n\nWould you like to load the snippets from that folder (a local backup of your current snippets will be saved automatically), or overwrite the folder with your current local snippets?`
+            : `Im Ordner „${folderPath}“ befindet sich bereits eine bausteine.ini.\n\nMöchtest du die vorhandenen Bausteine aus diesem Ordner laden (dein bisheriger lokaler Stand wird vorher automatisch gesichert) oder den Ordner mit deinen aktuellen lokalen Bausteinen überschreiben?`,
+          confirmText: en ? 'Load from Sync Folder' : 'Aus Sync-Ordner laden',
+          cancelText: en ? 'Overwrite with Local' : 'Mit lokalen überschreiben',
+          showCancel: true,
+          danger: false,
+        }).then((choosePull) => {
+          sendIPC('chooseSyncFolder', {
+            targetFolder: folderPath,
+            providerId,
+            resolutionMode: choosePull ? 'pull' : 'push',
+          });
+        });
+        break;
+      }
     }
   }
 
@@ -1243,6 +1295,116 @@
           : `Zuletzt aktive App ausschließen (${activeApp})`;
       } else {
         btnExcludeActiveApp.style.display = 'none';
+      }
+    }
+  }
+
+  function renderSyncUI() {
+    const en = isEn();
+    const s = state.syncStatus || {
+      enabled: false,
+      folderPath: '',
+      providerId: '',
+      status: 'idle',
+      lastSyncedAt: '',
+      detectedProviders: [],
+    };
+
+    const isEnabled = Boolean(s.enabled && s.folderPath);
+    const isOffline = isEnabled && s.status === 'offline';
+
+    if (syncLiveBadge) {
+      syncLiveBadge.classList.remove('active', 'offline');
+      if (!isEnabled) {
+        syncLiveBadge.textContent = en ? 'Off' : 'Aus';
+      } else if (isOffline) {
+        syncLiveBadge.textContent = en ? '⚠️ Offline (local active)' : '⚠️ Offline (lokal aktiv)';
+        syncLiveBadge.classList.add('offline');
+      } else {
+        syncLiveBadge.textContent = en ? '● Synced' : '● Synchronisiert';
+        syncLiveBadge.classList.add('active');
+      }
+    }
+
+    if (settingSyncDesc) {
+      if (!isEnabled) {
+        settingSyncDesc.textContent = en
+          ? 'Mirror local vault automatically with OneDrive, Google Drive, Dropbox, iCloud, Nextcloud, or NAS'
+          : 'Lokalen Tresor automatisch mit OneDrive, Google Drive, Dropbox, iCloud, Nextcloud oder NAS spiegeln';
+      } else {
+        let timeHint = '';
+        if (s.lastSyncedAt) {
+          try {
+            const dt = new Date(s.lastSyncedAt);
+            if (!Number.isNaN(dt.getTime())) {
+              timeHint =
+                ' • ' +
+                dt.toLocaleTimeString(en ? 'en-US' : 'de-DE', {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                });
+            }
+          } catch (e) {}
+        }
+        settingSyncDesc.textContent = `${s.folderPath}${timeHint}`;
+        settingSyncDesc.title = s.folderPath;
+      }
+    }
+
+    if (btnChooseSyncFolderLabel) {
+      btnChooseSyncFolderLabel.textContent = isEnabled
+        ? en
+          ? 'Change…'
+          : 'Ändern…'
+        : en
+          ? 'Choose folder…'
+          : 'Ordner wählen…';
+    }
+    if (btnSyncNow) {
+      btnSyncNow.style.display = isEnabled ? 'inline-flex' : 'none';
+      btnSyncNow.title = en ? 'Synchronize now' : 'Jetzt synchronisieren';
+    }
+    if (btnOpenSyncFolder) {
+      btnOpenSyncFolder.style.display = isEnabled ? 'inline-flex' : 'none';
+    }
+    if (btnDisconnectSync) {
+      btnDisconnectSync.style.display = isEnabled ? 'inline-flex' : 'none';
+    }
+
+    if (syncProvidersBar) {
+      const providers = Array.isArray(s.detectedProviders) ? s.detectedProviders : [];
+      syncProvidersBar.innerHTML = '';
+      if (providers.length === 0) {
+        syncProvidersBar.classList.add('hidden');
+      } else {
+        syncProvidersBar.classList.remove('hidden');
+        const hint = document.createElement('span');
+        hint.className = 'sync-providers-hint';
+        hint.textContent = en ? '1-Click Cloud:' : '1-Klick Cloud:';
+        syncProvidersBar.appendChild(hint);
+
+        const activeNorm = String(s.folderPath || '').toLowerCase();
+        for (const p of providers) {
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          const targetNorm = String(p.targetFolder || '').toLowerCase();
+          const isCurrent = isEnabled && activeNorm === targetNorm;
+          btn.className = 'sync-provider-chip' + (isCurrent ? ' active' : '');
+          btn.dataset.providerId = p.id;
+          btn.title = p.targetFolder;
+          btn.textContent = `☁️ ${p.name}`;
+          btn.addEventListener('click', () => {
+            if (isCurrent) {
+              sendIPC('syncNow');
+              return;
+            }
+            sendIPC('chooseSyncFolder', {
+              targetFolder: p.targetFolder,
+              providerId: p.id,
+            });
+          });
+          syncProvidersBar.appendChild(btn);
+        }
       }
     }
   }
@@ -2851,6 +3013,7 @@
     renderActiveHotkeys();
     renderExcludedApps();
     renderRollingBackups();
+    renderSyncUI();
     updateSecurityButtonsUI();
     renderUpdateUI();
     settingsModal.classList.add('active');
@@ -3018,6 +3181,18 @@
   if (btnImportData) btnImportData.addEventListener('click', () => sendIPC('importDialog'));
   if (btnExportData) btnExportData.addEventListener('click', () => sendIPC('exportDialog'));
   if (btnOpenDataFolder) btnOpenDataFolder.addEventListener('click', () => sendIPC('openDataFolder'));
+  if (btnChooseSyncFolder) {
+    btnChooseSyncFolder.addEventListener('click', () => sendIPC('chooseSyncFolder'));
+  }
+  if (btnSyncNow) {
+    btnSyncNow.addEventListener('click', () => sendIPC('syncNow'));
+  }
+  if (btnOpenSyncFolder) {
+    btnOpenSyncFolder.addEventListener('click', () => sendIPC('openSyncFolder'));
+  }
+  if (btnDisconnectSync) {
+    btnDisconnectSync.addEventListener('click', () => sendIPC('disconnectSyncFolder'));
+  }
 
   if (btnAddExcludedApp && excludedAppInput) {
     const submitExcludedApp = () => {
