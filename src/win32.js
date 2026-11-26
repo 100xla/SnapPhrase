@@ -1,5 +1,5 @@
 /**
- * SnapPhrase v1.7.0 — Win32 Native Integration (Koffi FFI)
+ * SnapPhrase v1.7.1 — Win32 Native Integration (Koffi FFI)
  * Handles window focus, clipboard protection (Win+V history exclusion),
  * atomic SendInput keyboard simulation, unified Low-Level Keyboard Hook (WH_KEYBOARD_LL)
  * for Double-Tap Ctrl trigger + automatic Hotstring expansion,
@@ -788,10 +788,20 @@ function startKeyboardHook(options) {
                             typedBuffer = typedBuffer.slice(-48);
                           }
 
-                          const bufLower = typedBuffer.toLowerCase();
+                           const bufLower = typedBuffer.toLowerCase();
                           for (let i = 0; i < triggers.length; i++) {
                             const t = triggers[i];
                             if (bufLower.endsWith(t.triggerLower)) {
+                              const needsBoundary =
+                                typeof t.requireWordBoundary === 'boolean'
+                                  ? t.requireWordBoundary
+                                  : !/^([;/:!#$~]{1,2})/.test(t.triggerLower);
+                              if (needsBoundary) {
+                                const prefixIdx = bufLower.length - t.triggerLower.length;
+                                if (prefixIdx > 0 && /[\p{L}\p{N}_]/u.test(bufLower[prefixIdx - 1])) {
+                                  continue;
+                                }
+                              }
                               typedBuffer = '';
                               isExpandingHotstring = true;
                               lastForegroundHwnd = fgHwnd;
@@ -801,7 +811,7 @@ function startKeyboardHook(options) {
                                 } finally {
                                   setTimeout(() => {
                                     isExpandingHotstring = false;
-                                  }, 80);
+                                  }, 125);
                                 }
                               }, 18);
                               break;
@@ -861,155 +871,11 @@ function stopKeyboardHook() {
 }
 
 // ============================================================================
-// Desktop Work Area & Window Docking
+// 6. Full-Screen Overlay Geometry, Live Desktop Blur Capture & DWM Backdrop
 // ============================================================================
-const SPI_GETWORKAREA = 0x0030;
-const SPI_SETWORKAREA = 0x002F;
-const SW_RESTORE = 9;
-const SW_MAXIMIZE = 3;
 const SWP_NOZORDER = 0x0004;
 const SWP_NOACTIVATE = 0x0010;
 const SWP_FRAMECHANGED = 0x0020;
-
-let originalWorkArea = null;
-let savedTargetWindowState = null;
-
-function setDesktopWorkArea(leftOffset = 0, rightOffset = 0) {
-  if (!SystemParametersInfoW) return;
-  try {
-    const current = {};
-    if (!SystemParametersInfoW(SPI_GETWORKAREA, 0, current, 0)) return;
-    if (!originalWorkArea) {
-      originalWorkArea = { ...current };
-    }
-    const newWa = {
-      left: originalWorkArea.left + leftOffset,
-      top: originalWorkArea.top,
-      right: originalWorkArea.right - rightOffset,
-      bottom: originalWorkArea.bottom,
-    };
-    SystemParametersInfoW(SPI_SETWORKAREA, 0, newWa, 0);
-  } catch (err) {
-    console.error('[Win32] setDesktopWorkArea error:', err);
-  }
-}
-
-function restoreDesktopWorkArea() {
-  if (!SystemParametersInfoW || !originalWorkArea) return;
-  try {
-    SystemParametersInfoW(SPI_SETWORKAREA, 0, originalWorkArea, 0);
-    originalWorkArea = null;
-  } catch (err) {
-    console.error('[Win32] restoreDesktopWorkArea error:', err);
-  }
-}
-
-function alignWindowsToDock(mode, width, targetHwnd = lastForegroundHwnd, displayInfo = null) {
-  if (mode === 'center') {
-    restoreWindowsFromDock();
-    return;
-  }
-
-  const isPrimary = !displayInfo || displayInfo.isPrimary !== false;
-
-  if (isPrimary) {
-    if (mode === 'sidebar_left') {
-      setDesktopWorkArea(width, 0);
-    } else if (mode === 'sidebar_right') {
-      setDesktopWorkArea(0, width);
-    }
-  } else {
-    restoreDesktopWorkArea();
-  }
-
-  if (!targetHwnd || !SetWindowPos || !GetWindowRect) return;
-
-  try {
-    const rect = {};
-    if (!GetWindowRect(targetHwnd, rect)) return;
-
-    const zoomed = IsZoomed ? IsZoomed(targetHwnd) : false;
-    if (!savedTargetWindowState) {
-      savedTargetWindowState = {
-        hwnd: targetHwnd,
-        rect: { ...rect },
-        wasZoomed: zoomed,
-      };
-    }
-
-    const baseWa = displayInfo && displayInfo.workArea
-      ? {
-          left: displayInfo.workArea.x,
-          top: displayInfo.workArea.y,
-          width: displayInfo.workArea.width,
-          height: displayInfo.workArea.height,
-        }
-      : {
-          left: originalWorkArea ? originalWorkArea.left : 0,
-          top: originalWorkArea ? originalWorkArea.top : 0,
-          width: originalWorkArea ? (originalWorkArea.right - originalWorkArea.left) : 1920,
-          height: originalWorkArea ? (originalWorkArea.bottom - originalWorkArea.top) : 1032,
-        };
-
-    if (zoomed && ShowWindow) {
-      ShowWindow(targetHwnd, SW_RESTORE);
-    }
-
-    if (mode === 'sidebar_left') {
-      SetWindowPos(
-        targetHwnd,
-        0,
-        baseWa.left + width,
-        baseWa.top,
-        baseWa.width - width,
-        baseWa.height,
-        SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED
-      );
-    } else if (mode === 'sidebar_right') {
-      SetWindowPos(
-        targetHwnd,
-        0,
-        baseWa.left,
-        baseWa.top,
-        baseWa.width - width,
-        baseWa.height,
-        SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED
-      );
-    }
-  } catch (err) {
-    console.error('[Win32] alignWindowsToDock error:', err);
-  }
-}
-
-function restoreWindowsFromDock() {
-  restoreDesktopWorkArea();
-
-  if (savedTargetWindowState && savedTargetWindowState.hwnd) {
-    try {
-      const { hwnd, rect, wasZoomed } = savedTargetWindowState;
-      if (wasZoomed && ShowWindow) {
-        ShowWindow(hwnd, SW_MAXIMIZE);
-      } else if (SetWindowPos) {
-        SetWindowPos(
-          hwnd,
-          0,
-          rect.left,
-          rect.top,
-          rect.right - rect.left,
-          rect.bottom - rect.top,
-          SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED
-        );
-      }
-    } catch (err) {
-      console.error('[Win32] restoreWindowsFromDock error:', err);
-    }
-    savedTargetWindowState = null;
-  }
-}
-
-// ============================================================================
-// 6. Full-Screen Overlay Geometry, Live Desktop Blur Capture & DWM Backdrop
-// ============================================================================
 const HWND_TOPMOST = -1;
 const SWP_NOSENDCHANGING = 0x0400;
 const WCA_ACCENT_POLICY = 19;
@@ -1601,10 +1467,6 @@ module.exports = {
   startKeyboardHook,
   stopKeyboardHook,
   resetHotstringBuffer,
-  setDesktopWorkArea,
-  restoreDesktopWorkArea,
-  alignWindowsToDock,
-  restoreWindowsFromDock,
   captureDisplayBackdrop,
   suppressOverlayWindowFrame,
   installFramelessWindowGuard,

@@ -1,5 +1,5 @@
 /**
- * SnapPhrase v1.7.0 — Apple-Inspired Spotlight & Frosted Glass Stylesheet
+ * SnapPhrase v1.7.1 — Apple-Inspired Spotlight & Frosted Glass Stylesheet
  * Supports Dark & Light mode, Fullscreen Blurred & Dimmed Focus Backdrop,
  * Centered Spotlight layout, Softwareupdate UI, Modals, and Context Menu.
  */
@@ -529,6 +529,38 @@ body.no-anim .modal-box {
   flex: 1;
 }
 
+body:not(.center-compact) .snippet-card.selected {
+  align-items: flex-start;
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+
+body:not(.center-compact) .snippet-card.selected .card-bottom {
+  align-items: flex-end;
+}
+
+body:not(.center-compact) .snippet-card.selected .card-preview {
+  white-space: pre-line;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  line-height: 1.42;
+  color: var(--text-main);
+  opacity: 0.9;
+}
+
+.search-highlight {
+  background: rgba(10, 132, 255, 0.25);
+  color: inherit;
+  border-radius: 3px;
+  padding: 0 2px;
+  font-weight: 650;
+}
+
+html.light .search-highlight {
+  background: rgba(0, 122, 255, 0.2);
+}
+
 .card-meta {
   display: flex;
   align-items: center;
@@ -870,6 +902,24 @@ html.light .modal-overlay {
   background: rgba(10, 132, 255, 0.13);
   padding: 1px 6px;
   border-radius: 5px;
+}
+
+.field-live-hint.conflict {
+  font-family: inherit;
+  font-weight: 600;
+  color: #ff9f0a;
+  background: rgba(255, 159, 10, 0.16);
+  padding: 1px 7px;
+  border-radius: 5px;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+html.light .field-live-hint.conflict {
+  color: #c2410c;
+  background: rgba(234, 88, 12, 0.14);
 }
 
 .fav-toggle-btn {

@@ -1,5 +1,5 @@
 /**
- * SnapPhrase v1.7.0 — Cryptography Engine
+ * SnapPhrase v1.7.1 — Cryptography Engine
  * AES-256-CBC + PBKDF2-SHA256 (100,000 rounds) + HMAC-SHA256 + Base64
  * 100% byte-compatible with bausteine.ini formats (SPENC2:, STENC2:, QTENC2:, TSENC2:, QTENC:, TSENC:)
  */
@@ -33,6 +33,41 @@ class AES256 {
     // Result: Salt[16] + HMAC[32] + IV[16] + Ciphertext
     const combined = Buffer.concat([salt, hmac, iv, ciphertext]);
     return combined.toString('base64');
+  }
+
+  /**
+   * Asynchronously encrypts plaintext off the main thread using libuv's worker pool (0ms keyboard hook pause).
+   */
+  static encryptAsync(plaintext, password) {
+    return new Promise((resolve, reject) => {
+      try {
+        const salt = crypto.randomBytes(16);
+        const iv = crypto.randomBytes(16);
+
+        crypto.pbkdf2(password, salt, PBKDF2_ITERATIONS, 64, 'sha256', (err, derivedKey) => {
+          if (err) return reject(err);
+          try {
+            const aesKey = derivedKey.subarray(0, 32);
+            const hmacKey = derivedKey.subarray(32, 64);
+
+            const cipher = crypto.createCipheriv('aes-256-cbc', aesKey, iv);
+            const ciphertext = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
+
+            const hmac = crypto
+              .createHmac('sha256', hmacKey)
+              .update(Buffer.concat([salt, iv, ciphertext]))
+              .digest();
+
+            const combined = Buffer.concat([salt, hmac, iv, ciphertext]);
+            resolve(combined.toString('base64'));
+          } catch (innerErr) {
+            reject(innerErr);
+          }
+        });
+      } catch (outerErr) {
+        reject(outerErr);
+      }
+    });
   }
 
   /**

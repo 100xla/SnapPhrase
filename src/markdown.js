@@ -1,5 +1,5 @@
 /**
- * SnapPhrase v1.7.0 — Markdown & Rich-Text Clipboard Formatter
+ * SnapPhrase v1.7.1 — Markdown & Rich-Text Clipboard Formatter
  */
 
 const CURSOR_SENTINEL = '\uE000SNAPCURSOR\uE000';
@@ -158,34 +158,40 @@ function markdownToClipboardFormats(rawText) {
   flushPara();
   flushList();
 
-  // Build plain text representation preserving line breaks
+  // Build plain text representation preserving line breaks, plus logical rich-editor text (without synthetic "• " / "1. " list prefixes)
   const plainChunks = [];
+  const editorChunks = [];
   for (const block of blocks) {
     if (block.type === 'blank') {
       plainChunks.push('');
     } else if (block.type === 'heading') {
       plainChunks.push(block.content.plain);
+      editorChunks.push(block.content.plain);
     } else if (block.type === 'paragraph') {
-      plainChunks.push(block.lines.map((l) => l.plain).join('\n'));
+      const pText = block.lines.map((l) => l.plain).join('\n');
+      plainChunks.push(pText);
+      editorChunks.push(pText);
     } else if (block.type === 'list') {
       plainChunks.push(
         block.items
           .map((item) => (block.ordered ? `${item.num}. ${item.content.plain}` : `• ${item.content.plain}`))
           .join('\n')
       );
+      editorChunks.push(block.items.map((item) => item.content.plain).join('\n'));
     }
   }
   const plainText = plainChunks.join('\n');
+  const editorText = editorChunks.join('\n');
 
   // Filter content blocks for semantic HTML (avoid extra trailing margins)
   const contentBlocks = blocks.filter((b) => b.type !== 'blank');
   if (contentBlocks.length === 0) {
-    return { text: plainText, html: '' };
+    return { text: plainText, editorText, html: '' };
   }
 
   if (contentBlocks.length === 1 && contentBlocks[0].type === 'paragraph') {
     const inlineHtml = contentBlocks[0].lines.map((l) => l.html).join('<br>');
-    return { text: plainText, html: inlineHtml };
+    return { text: plainText, editorText, html: inlineHtml };
   }
 
   const htmlParts = contentBlocks.map((block, idx) => {
@@ -204,7 +210,7 @@ function markdownToClipboardFormats(rawText) {
     return `<${tag}${startAttr} style="margin:0 0 ${marginBottom} 0;padding-left:20px;">${liHtml}</${tag}>`;
   });
 
-  return { text: plainText, html: htmlParts.join('') };
+  return { text: plainText, editorText, html: htmlParts.join('') };
 }
 
 function preparePastePayloads(resolvedText, { richText = false } = {}) {
@@ -236,11 +242,12 @@ function preparePastePayloads(resolvedText, { richText = false } = {}) {
   let cursorOffset = 0;
   let finalText = formatted.text;
   let finalHtml = formatted.html;
+  const logicalEditorText = typeof formatted.editorText === 'string' ? formatted.editorText : formatted.text;
 
   if (hasCursor) {
-    const sIdx = finalText.indexOf(CURSOR_SENTINEL);
+    const sIdx = logicalEditorText.indexOf(CURSOR_SENTINEL);
     if (sIdx !== -1) {
-      const after = finalText.slice(sIdx + CURSOR_SENTINEL.length);
+      const after = logicalEditorText.slice(sIdx + CURSOR_SENTINEL.length);
       cursorOffset = Array.from(after.replace(/\r/g, '')).length;
     }
     finalText = finalText.split(CURSOR_SENTINEL).join('');

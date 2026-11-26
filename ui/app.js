@@ -1,5 +1,5 @@
 /**
- * SnapPhrase v1.7.0 — Renderer Application Logic
+ * SnapPhrase v1.7.1 — Renderer Application Logic
  * Apple-inspired Spotlight UI with token search, smart template prompts, hotstring configuration,
  * automatic DE/EN localization, background software updates, non-blocking confirmation modals,
  * custom context menu, favorites, and encryption management.
@@ -16,7 +16,7 @@
   }
 
   const state = {
-    version: '1.7.0',
+    version: '1.7.1',
     language: 'auto', // 'auto' | 'de' | 'en'
     effectiveLanguage: detectBrowserLanguage(), // 'de' | 'en'
     isWindowsStore: false,
@@ -193,13 +193,15 @@
   const btnCancelCrypto = document.getElementById('btnCancelCrypto');
   const btnApplyCrypto = document.getElementById('btnApplyCrypto');
 
-  // In-App Confirm / Alert Modal
+  // In-App Confirm / Alert / Input Modal
   const confirmModal = document.getElementById('confirmModal');
   const confirmTitle = document.getElementById('confirmTitle');
   const confirmMessage = document.getElementById('confirmMessage');
+  const confirmInput = document.getElementById('confirmInput');
   const btnConfirmCancel = document.getElementById('btnConfirmCancel');
   const btnConfirmOk = document.getElementById('btnConfirmOk');
   let confirmResolver = null;
+  let confirmInputMode = false;
 
   // Custom Context Menu
   const contextMenu = document.getElementById('contextMenu');
@@ -604,26 +606,52 @@
     cancelText = isEn() ? 'Cancel' : 'Abbrechen',
     showCancel = true,
     danger = false,
+    inputMode = false,
+    initialValue = '',
+    inputPlaceholder = '',
   }) {
     return new Promise((resolve) => {
       confirmResolver = resolve;
+      confirmInputMode = Boolean(inputMode);
       confirmTitle.textContent = title;
       confirmMessage.textContent = message;
       btnConfirmOk.textContent = confirmText;
       btnConfirmOk.className = danger ? 'btn btn-danger' : 'btn btn-primary';
       btnConfirmCancel.textContent = cancelText;
       btnConfirmCancel.style.display = showCancel ? 'inline-flex' : 'none';
+      if (confirmInput) {
+        confirmInput.style.display = confirmInputMode ? 'block' : 'none';
+        confirmInput.value = confirmInputMode ? String(initialValue || '') : '';
+        confirmInput.placeholder = confirmInputMode ? String(inputPlaceholder || '') : '';
+      }
       confirmModal.classList.add('active');
-      setTimeout(() => btnConfirmOk.focus(), 30);
+      setTimeout(() => {
+        if (confirmInputMode && confirmInput) {
+          confirmInput.focus();
+          confirmInput.select();
+        } else {
+          btnConfirmOk.focus();
+        }
+      }, 30);
     });
   }
 
   function resolveConfirmModal(result) {
     confirmModal.classList.remove('active');
+    const isInput = confirmInputMode;
+    const val = confirmInput ? confirmInput.value : '';
+    confirmInputMode = false;
+    if (confirmInput) {
+      confirmInput.style.display = 'none';
+    }
     if (confirmResolver) {
       const fn = confirmResolver;
       confirmResolver = null;
-      fn(result);
+      if (isInput) {
+        fn(result ? val : null);
+      } else {
+        fn(result);
+      }
     }
   }
 
@@ -999,13 +1027,39 @@
     }
   }
 
+  function findTriggerConflict(rawKuerzel, currentOriginalTitle = '') {
+    const raw = String(rawKuerzel || '').trim();
+    if (!raw) return null;
+    const targetEff = computeEffectiveHotstring(raw, state.hotstringPrefix).toLowerCase();
+    const origLower = String(currentOriginalTitle || '').trim().toLowerCase();
+    return (
+      state.snippets.find((s) => {
+        if (!s.kuerzel) return false;
+        if (origLower && (s.title || '').trim().toLowerCase() === origLower) return false;
+        const sEff = computeEffectiveHotstring(s.kuerzel, state.hotstringPrefix).toLowerCase();
+        return sEff === targetEff;
+      }) || null
+    );
+  }
+
   function updateEditKuerzelLiveBadge() {
     if (!editKuerzelLiveBadge || !editKuerzel) return;
     const en = isEn();
     const raw = editKuerzel.value.trim();
+    editKuerzelLiveBadge.classList.remove('active', 'conflict');
+    editKuerzelLiveBadge.removeAttribute('title');
     if (!raw) {
       editKuerzelLiveBadge.textContent = 'Optional';
-      editKuerzelLiveBadge.classList.remove('active');
+      return;
+    }
+    const conflict = findTriggerConflict(raw, editOriginalTitle ? editOriginalTitle.value : '');
+    if (conflict) {
+      const msg = en
+        ? `⚠️ Used by "${conflict.title}"`
+        : `⚠️ Belegt durch „${conflict.title}“`;
+      editKuerzelLiveBadge.textContent = msg;
+      editKuerzelLiveBadge.title = msg;
+      editKuerzelLiveBadge.classList.add('conflict');
       return;
     }
     if (state.hotstringsEnabled) {
@@ -1712,6 +1766,34 @@
         btn.appendChild(lbl);
       } else {
         btn.textContent = cat;
+        if (!cat.startsWith('[')) {
+          btn.title = en
+            ? 'Right-click to rename category'
+            : 'Rechtsklick zum Umbenennen der Kategorie';
+          btn.addEventListener('contextmenu', async (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const result = await showConfirmDialog({
+              title: en ? 'Rename Category' : 'Kategorie umbenennen',
+              message: en
+                ? `Enter a new name for the category "${cat}" (leave empty to remove the category from its snippets):`
+                : `Neuen Namen für die Kategorie „${cat}“ eingeben (leer lassen, um die Kategoriezuordnung zu entfernen):`,
+              confirmText: en ? 'Save' : 'Speichern',
+              cancelText: en ? 'Cancel' : 'Abbrechen',
+              danger: false,
+              inputMode: true,
+              initialValue: cat,
+              inputPlaceholder: en ? 'Category name…' : 'Kategoriename…',
+            });
+            if (result === null) return;
+            const nextCat = String(result).trim().replace(/[\r\n]+/g, ' ');
+            if (nextCat === cat) return;
+            if (state.activeCategory === cat) {
+              state.activeCategory = nextCat || '[ Alle ]';
+            }
+            sendIPC('renameCategory', { oldCategory: cat, newCategory: nextCat });
+          });
+        }
       }
       btn.addEventListener('click', () => {
         state.activeCategory = cat;
@@ -1814,9 +1896,44 @@
   let lastRenderedListKey = '';
   let renderedSelectedCardIndex = -1;
 
+  function setHighlightedText(container, text, searchTerms) {
+    const str = String(text || '');
+    if (!searchTerms || searchTerms.length === 0 || !str) {
+      container.textContent = str;
+      return;
+    }
+    const escaped = searchTerms
+      .map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+      .filter(Boolean);
+    if (escaped.length === 0) {
+      container.textContent = str;
+      return;
+    }
+    const rx = new RegExp(`(${escaped.join('|')})`, 'gi');
+    const frag = document.createDocumentFragment();
+    let lastIndex = 0;
+    let match;
+    while ((match = rx.exec(str)) !== null) {
+      if (match.index > lastIndex) {
+        frag.appendChild(document.createTextNode(str.slice(lastIndex, match.index)));
+      }
+      const mark = document.createElement('mark');
+      mark.className = 'search-highlight';
+      mark.textContent = match[0];
+      frag.appendChild(mark);
+      lastIndex = rx.lastIndex;
+      if (match[0].length === 0) rx.lastIndex++;
+    }
+    if (lastIndex < str.length) {
+      frag.appendChild(document.createTextNode(str.slice(lastIndex)));
+    }
+    container.replaceChildren(frag);
+  }
+
   function renderList() {
     const en = isEn();
     const rawQuery = searchInput.value.trim().toLowerCase();
+    const searchTerms = rawQuery ? rawQuery.split(/\s+/).filter(Boolean) : [];
     const nextListKey = `${snippetsDataRevision}|${state.effectiveLanguage}|${state.activeCategory}|${rawQuery}|${state.hotstringsEnabled ? '1' : '0'}|${state.hotstringPrefix}`;
 
     if (state.filteredSnippets.length === 0) {
@@ -1953,7 +2070,7 @@
 
       const titleSpan = document.createElement('span');
       titleSpan.className = 'card-title';
-      titleSpan.textContent = item.title;
+      setHighlightedText(titleSpan, item.title, searchTerms);
       topRow.appendChild(titleSpan);
 
       const badgesDiv = document.createElement('div');
@@ -2006,7 +2123,12 @@
 
       const previewSpan = document.createElement('span');
       previewSpan.className = 'card-preview';
-      previewSpan.textContent = (item.content || '').replace(/[\r\n]+/g, ' ');
+      const normalizedPreview = (item.content || '')
+        .replace(/\r\n/g, '\n')
+        .replace(/[ \t]+/g, ' ')
+        .replace(/\n{2,}/g, '\n')
+        .trim();
+      setHighlightedText(previewSpan, normalizedPreview, searchTerms);
       bottomRow.appendChild(previewSpan);
 
       const metaDiv = document.createElement('div');

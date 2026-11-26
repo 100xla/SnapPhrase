@@ -1,5 +1,5 @@
 /**
- * SnapPhrase v1.7.0 — Dynamic Date, Time & Variable Placeholder Engine
+ * SnapPhrase v1.7.1 — Dynamic Date, Time & Variable Placeholder Engine
  */
 
 const GERMAN_WEEKDAYS = ['Sonntag', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag'];

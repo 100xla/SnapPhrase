@@ -1,5 +1,5 @@
 /**
- * SnapPhrase v1.7.0 — Main Process
+ * SnapPhrase v1.7.1 — Main Process
  * Supports:
  * - Centered Spotlight Mode (Apple-inspired floating palette with smooth blurred & dimmed desktop backdrop)
  * - Automatic Bilingual UI & Templates (Auto-detects Windows language DE/EN + manual switch in Settings)
@@ -26,6 +26,7 @@ const {
   shell,
   nativeImage,
   nativeTheme,
+  powerMonitor,
 } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -37,7 +38,7 @@ const { preparePastePayloads } = require('./markdown');
 
 const APP_ID = 'com.snapphrase.app';
 const APP_NAME = 'SnapPhrase';
-const APP_VERSION = '1.7.0';
+const APP_VERSION = '1.7.1';
 const CENTER_WIDTH_STANDARD = 1120;
 const CENTER_HEIGHT_STANDARD = 780;
 const CENTER_WIDTH_COMPACT = 580;
@@ -275,7 +276,6 @@ function handleWindowsSessionEnd() {
   cancelHideAnimation();
   try {
     storage.flushSave();
-    win32.restoreWindowsFromDock();
   } catch (e) {}
 }
 
@@ -605,10 +605,6 @@ function createSatzTresorWindow() {
     }
   });
 
-  mainWindow.on('hide', () => {
-    win32.restoreWindowsFromDock();
-  });
-
   mainWindow.on('close', (e) => {
     if (!isQuitting) {
       e.preventDefault();
@@ -617,15 +613,10 @@ function createSatzTresorWindow() {
   });
 }
 
-function updatePinAndDock() {
-  win32.restoreWindowsFromDock();
-}
-
 function applyLayout() {
   storage.setLayoutMode('center');
   if (!mainWindow) return;
 
-  win32.restoreWindowsFromDock();
   syncWindowGeometry();
   sendDataToRenderer();
   updateTrayMenu();
@@ -661,6 +652,7 @@ function rebuildHotstringTriggers() {
       trigger: effective,
       triggerLower: effective.toLowerCase(),
       triggerCharLen: charLen,
+      requireWordBoundary: !/^([;/:!#$~]{1,2})/.test(effective),
       snippet: s,
     });
   }
@@ -708,7 +700,7 @@ function restartKeyboardHook() {
 function handleHotstringMatch(match, targetHwnd) {
   if (!match || !match.snippet || storage.isLocked) return;
 
-  const savedClipboard = snapshotClipboard();
+  const savedClipboard = acquireClipboardSnapshot();
   const rawContent = match.snippet.content || '';
   const hasInteractiveVars = /\{\?([^}]+)\}/.test(rawContent);
 
@@ -756,7 +748,6 @@ function sendDataToRenderer(options = {}) {
     effectiveLanguage: storage.getEffectiveLanguage(),
     isWindowsStore: isWindowsStoreBuild,
     layoutMode: storage.getLayoutMode(),
-    sidebarWidth: storage.getSidebarWidth(),
     centerCompact: storage.getCenterCompact(),
     backdropMode: storage.getBackdropMode(),
     backdropBlurPercent: storage.getBackdropBlurPercent(),
@@ -826,10 +817,6 @@ function finalizePendingShow(seq) {
 
   revealAndFocusMainWindow(ctx, isPinned);
 
-  if (isPinned) {
-    updatePinAndDock(true);
-  }
-
   mainWindow.webContents.send('satztresor-msg', {
     type: 'startEntrance',
     seq,
@@ -897,7 +884,6 @@ function showWindow(options = {}) {
     dimBackground: storage.getDimBackground(),
     backdropSnapshot: !isPinned ? currentBackdropSnapshot : null,
     centerCompact: storage.getCenterCompact(),
-    sidebarWidth: storage.getSidebarWidth(),
     isLocked: storage.isLocked,
     lastForegroundApp: getLastExternalForegroundApp(),
     insets: ctx ? ctx.workAreaInsets : { top: 0, right: 0, bottom: 0, left: 0 },
@@ -917,10 +903,6 @@ function showWindow(options = {}) {
 
   revealAndFocusMainWindow(ctx, isPinned);
 
-  if (isPinned) {
-    updatePinAndDock(true);
-  }
-
   if (postShowMessage && !storage.isLocked) {
     mainWindow.webContents.send('satztresor-msg', postShowMessage);
   } else if (storage.isLocked) {
@@ -939,7 +921,6 @@ function hideWindowSmoothly({ restoreFocus = false, immediate = false } = {}) {
     if (isMainRendererReady && mainWindow.webContents) {
       mainWindow.webContents.send('satztresor-msg', { type: 'resetHiddenState' });
     }
-    win32.restoreWindowsFromDock();
     return;
   }
 
@@ -950,7 +931,6 @@ function hideWindowSmoothly({ restoreFocus = false, immediate = false } = {}) {
     if (isMainRendererReady && mainWindow.webContents) {
       mainWindow.webContents.send('satztresor-msg', { type: 'resetHiddenState' });
     }
-    win32.restoreWindowsFromDock();
     if (restoreFocus) {
       const targetHwnd = win32.getLastForegroundWindow();
       if (targetHwnd) win32.restoreForegroundWindow(targetHwnd);
@@ -992,7 +972,6 @@ function hideWindowSmoothly({ restoreFocus = false, immediate = false } = {}) {
         }
       } catch (e) {}
     }
-    win32.restoreWindowsFromDock();
   }, CLOSE_ANIMATION_MS);
 }
 
@@ -1015,6 +994,9 @@ function resolveTemplates(text, sourceClipboardText = null) {
   });
 }
 
+let pendingClipboardRestoreTimer = null;
+let activeOriginalClipboardSnap = null;
+
 function snapshotClipboard() {
   try {
     const text = clipboard.readText() || '';
@@ -1032,6 +1014,35 @@ function snapshotClipboard() {
   } catch (e) {
     return { text: '', html: '', rtf: '', image: null, hasImage: false };
   }
+}
+
+/**
+ * Captures the user's true original clipboard content, even if called inside the 420ms restore window
+ * of an immediately preceding hotstring or snippet paste.
+ */
+function acquireClipboardSnapshot() {
+  if (pendingClipboardRestoreTimer !== null && activeOriginalClipboardSnap !== null) {
+    clearTimeout(pendingClipboardRestoreTimer);
+    pendingClipboardRestoreTimer = null;
+    const preserved = activeOriginalClipboardSnap;
+    activeOriginalClipboardSnap = null;
+    return preserved;
+  }
+  return snapshotClipboard();
+}
+
+function scheduleClipboardRestore(previousSnap, expectedInjectedText) {
+  if (pendingClipboardRestoreTimer !== null) {
+    clearTimeout(pendingClipboardRestoreTimer);
+    pendingClipboardRestoreTimer = null;
+  }
+  activeOriginalClipboardSnap = previousSnap;
+  pendingClipboardRestoreTimer = setTimeout(() => {
+    pendingClipboardRestoreTimer = null;
+    const snapToRestore = activeOriginalClipboardSnap;
+    activeOriginalClipboardSnap = null;
+    restoreClipboardSnapshot(snapToRestore, expectedInjectedText);
+  }, 420);
 }
 
 function restoreClipboardSnapshot(snap, expectedInjectedText = null) {
@@ -1070,7 +1081,7 @@ function restoreClipboardSnapshot(snap, expectedInjectedText = null) {
 
 async function executePaste(text, savedClipboardOverride = null, options = {}) {
   const { richText = false } = options;
-  const previousSnap = savedClipboardOverride !== null ? savedClipboardOverride : snapshotClipboard();
+  const previousSnap = savedClipboardOverride !== null ? savedClipboardOverride : acquireClipboardSnapshot();
   const previousText = typeof previousSnap === 'string' ? previousSnap : (previousSnap.text || '');
   const resolved = resolveTemplates(text, previousText);
   const { text: plainText, html, cursorOffset } = preparePastePayloads(resolved, { richText });
@@ -1093,9 +1104,7 @@ async function executePaste(text, savedClipboardOverride = null, options = {}) {
   }
 
   if (storage.getRestoreClipboard()) {
-    setTimeout(() => {
-      restoreClipboardSnapshot(previousSnap, plainText);
-    }, 420);
+    scheduleClipboardRestore(previousSnap, plainText);
   }
 }
 
@@ -1484,7 +1493,7 @@ ipcMain.on('satztresor-msg', (event, data) => {
 
     case 'paste': {
       const { title, text, richText = false, forcePlainText = false } = data;
-      const savedClip = pendingPromptClipboard !== null ? pendingPromptClipboard : snapshotClipboard();
+      const savedClip = pendingPromptClipboard !== null ? pendingPromptClipboard : acquireClipboardSnapshot();
       pendingPromptClipboard = null;
 
       const isPinned = storage.isPinned();
@@ -1583,7 +1592,6 @@ ipcMain.on('satztresor-msg', (event, data) => {
       }
       sendDataToRenderer({ includeBackdropSnapshot: true });
       syncWindowGeometry();
-      updatePinAndDock(next);
       mainWindow.webContents.send('satztresor-msg', {
         type: 'showToast',
         message: next
@@ -1594,6 +1602,24 @@ ipcMain.on('satztresor-msg', (event, data) => {
             ? '✓ Unpinned'
             : '✓ Anheftung gelöst',
       });
+      break;
+    }
+
+    case 'renameCategory': {
+      const res = storage.renameCategory(data.oldCategory, data.newCategory);
+      if (res.success && res.count > 0) {
+        sendDataToRenderer();
+        mainWindow.webContents.send('satztresor-msg', {
+          type: 'showToast',
+          message: res.newCategory
+            ? isEn()
+              ? `✓ Category renamed to "${res.newCategory}"`
+              : `✓ Kategorie in „${res.newCategory}“ umbenannt`
+            : isEn()
+              ? '✓ Category removed from snippets'
+              : '✓ Kategorie bei Bausteinen entfernt',
+        });
+      }
       break;
     }
 
@@ -2109,7 +2135,6 @@ function prepareQuitForUpdate() {
   isQuitting = true;
   cancelHideAnimation();
   storage.flushSave();
-  win32.restoreWindowsFromDock();
   win32.stopKeyboardHook();
   win32.removeAllFramelessWindowGuards();
   globalShortcut.unregisterAll();
@@ -2130,8 +2155,18 @@ function applyThemeAndBoundsAfterUnlock() {
   syncSystemTheme();
   if (!mainWindow) return;
   syncWindowGeometry();
-  if (storage.isPinned()) {
-    updatePinAndDock(true);
+}
+
+function lockVaultOnSystemIdle() {
+  if (!storage || !storage.isEncrypted || storage.isLocked) return;
+  const res = storage.lock();
+  if (res && res.success) {
+    restartKeyboardHook();
+    sendDataToRenderer();
+    updateTrayMenu();
+    if (mainWindow && !mainWindow.isDestroyed() && isMainRendererReady) {
+      mainWindow.webContents.send('satztresor-msg', { type: 'openUnlock' });
+    }
   }
 }
 
@@ -2159,6 +2194,11 @@ app.whenReady().then(() => {
   registerHotkeys();
   restartKeyboardHook();
   updater.startSchedule();
+
+  if (powerMonitor && typeof powerMonitor.on === 'function') {
+    powerMonitor.on('lock-screen', lockVaultOnSystemIdle);
+    powerMonitor.on('suspend', lockVaultOnSystemIdle);
+  }
 
   const handleDisplayChange = () => {
     updateTrayMenu();
@@ -2193,7 +2233,6 @@ app.on('will-quit', () => {
     updater.stopSchedule();
   }
   storage.flushSave();
-  win32.restoreWindowsFromDock();
   win32.stopKeyboardHook();
   win32.removeAllFramelessWindowGuards();
   globalShortcut.unregisterAll();

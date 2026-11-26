@@ -1,5 +1,5 @@
 /**
- * SnapPhrase v1.7.0 — Storage & INI Database Engine
+ * SnapPhrase v1.7.1 — Storage & INI Database Engine
  * Handles atomic file operations, smart hash-verified rolling backups, INI serialization,
  * AES-256-CBC database encryption (lock & password change), JSON/CSV/INI import/export,
  * debounced usage persistence, and application settings.
@@ -19,7 +19,6 @@ const UI_SETTING_KEYS = [
   'Language',
   'LayoutMode',
   'IsPinned',
-  'SidebarWidth',
   'CenterCompact',
   'BackdropMode',
   'BackdropBlurPercent',
@@ -47,7 +46,6 @@ const PERSISTED_UI_PREF_KEYS = [
   'BackdropCalibratedV2',
   'DimBackground',
   'CenterCompact',
-  'SidebarWidth',
   'DoubleTapCtrlEnabled',
   'HotstringsEnabled',
   'HotstringPrefix',
@@ -835,7 +833,7 @@ class Storage {
     }
     this._saveTimer = setTimeout(() => {
       this._saveTimer = null;
-      this.save();
+      this.saveAsync();
     }, delayMs);
   }
 
@@ -844,6 +842,67 @@ class Storage {
       clearTimeout(this._saveTimer);
       this._saveTimer = null;
       this.save();
+    } else if (this._asyncSavePending) {
+      this.save();
+    }
+  }
+
+  _writeContentAtomically(fileContent) {
+    const parentDir = path.dirname(this.filePath);
+    if (!fs.existsSync(parentDir)) {
+      try {
+        fs.mkdirSync(parentDir, { recursive: true });
+      } catch (e) {}
+    }
+
+    const tmpPath = `${this.filePath}.${process.pid}.${Date.now()}.tmp`;
+    try {
+      fs.writeFileSync(tmpPath, fileContent, 'utf8');
+      try {
+        fs.renameSync(tmpPath, this.filePath);
+      } catch (renameErr) {
+        fs.writeFileSync(this.filePath, fileContent, 'utf8');
+        try {
+          if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
+        } catch (e) {}
+      }
+    } catch (err) {
+      console.error('[Storage] Save error:', err);
+      try {
+        if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
+      } catch (e) {}
+    }
+  }
+
+  async saveAsync() {
+    if (this.isLocked || this.inMemoryOnly) return;
+    if (this._saveTimer) {
+      clearTimeout(this._saveTimer);
+      this._saveTimer = null;
+    }
+
+    if (!this.isEncrypted || !this.masterPassword) {
+      this.save();
+      return;
+    }
+
+    const saveSeq = (this._saveGeneration = (this._saveGeneration || 0) + 1);
+    this._asyncSavePending = true;
+    this._syncCachedSettings();
+    const plain = this.serializeIni();
+    const passwordSnap = this.masterPassword;
+
+    try {
+      const cipher = await AES256.encryptAsync('SnapPhraseVerifiedMasterKey:' + plain, passwordSnap);
+      if (this.isLocked || this._saveGeneration !== saveSeq) return;
+      this.rawCipher = cipher;
+      this._writeContentAtomically('SPENC2:' + cipher);
+    } catch (err) {
+      console.error('[Storage] Async save error:', err);
+    } finally {
+      if (this._saveGeneration === saveSeq) {
+        this._asyncSavePending = false;
+      }
     }
   }
 
@@ -853,6 +912,8 @@ class Storage {
       clearTimeout(this._saveTimer);
       this._saveTimer = null;
     }
+    this._saveGeneration = (this._saveGeneration || 0) + 1;
+    this._asyncSavePending = false;
 
     this._syncCachedSettings();
     const plain = this.serializeIni();
@@ -864,35 +925,7 @@ class Storage {
       this.rawCipher = cipher;
     }
 
-    const parentDir = path.dirname(this.filePath);
-    if (!fs.existsSync(parentDir)) {
-      try {
-        fs.mkdirSync(parentDir, { recursive: true });
-      } catch (e) {}
-    }
-
-    const tmpPath = `${this.filePath}.${process.pid}.${Date.now()}.tmp`;
-    try {
-      fs.writeFileSync(tmpPath, fileContent, 'utf8');
-
-      let renamed = false;
-      try {
-        fs.renameSync(tmpPath, this.filePath);
-        renamed = true;
-      } catch (renameErr) {
-        // Fallback direct write if cloud-sync temporarily locks target rename
-        fs.writeFileSync(this.filePath, fileContent, 'utf8');
-        try {
-          if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
-        } catch (e) {}
-        renamed = true;
-      }
-    } catch (err) {
-      console.error('[Storage] Save error:', err);
-      try {
-        if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
-      } catch (e) {}
-    }
+    this._writeContentAtomically(fileContent);
   }
 
   isReservedSection(name) {
@@ -1204,13 +1237,40 @@ class Storage {
     this.setSetting('IsPinned', pinned ? '1' : '0');
   }
 
-  getSidebarWidth() {
-    const val = parseInt(this.getSetting('SidebarWidth', '440'), 10);
-    return isNaN(val) || val < 280 || val > 800 ? 440 : val;
-  }
+  renameCategory(oldCategory, newCategory) {
+    if (this.isLocked) return { success: false, count: 0 };
+    const cleanOld = String(oldCategory || '').trim();
+    const cleanNew = String(newCategory || '').replace(/[\r\n\[\]]/g, ' ').trim();
+    if (!cleanOld || cleanOld.startsWith('[') || cleanNew.startsWith('[')) {
+      return { success: false, count: 0 };
+    }
+    if (cleanOld === cleanNew) {
+      return { success: true, count: 0, newCategory: cleanNew };
+    }
 
-  setSidebarWidth(width) {
-    this.setSetting('SidebarWidth', String(width));
+    this.maybeCreateRollingBackup({ minIntervalMs: 3 * 60 * 1000 });
+
+    let count = 0;
+    for (const [section, keys] of this.data.entries()) {
+      if (!section || this.isReservedSection(section)) continue;
+      const currentCat = (
+        keys.get('Arbeitsbereich') ||
+        keys.get('Kategorie') ||
+        keys.get('Workspace') ||
+        ''
+      ).trim();
+      if (currentCat === cleanOld) {
+        keys.delete('Kategorie');
+        keys.delete('Workspace');
+        keys.set('Arbeitsbereich', cleanNew);
+        count++;
+      }
+    }
+
+    if (count > 0) {
+      this.save();
+    }
+    return { success: true, count, newCategory: cleanNew };
   }
 
   getTheme() {
